@@ -1,0 +1,24 @@
+[project]
+name = "soaphound"
+version = "0.1.0"
+description = "Bloodhound python Ingestor using ADWS"
+authors = [
+    {name = "@belettet1m0ree"},
+    {name = "@Sant0rryu"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "impacket (>=0.12.0,<0.13.0)"
+]
+
+[tool.poetry.scripts]
+soaphound = "soaphound.soaphound:main"
+
+[tool.poetry]
+packages = [{include = "soaphound", from = "src"}]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
