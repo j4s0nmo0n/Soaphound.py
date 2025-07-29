@@ -187,13 +187,23 @@ class ADWSConnect:
             raise ADWSError(f"NMF connection failed: {e}")
         return nmf
 
+    def get_root_domain_dn(self, fqdn: str) -> str:
+        """
+        Transforms an FQDN (e.g., sub1.sub.tld) into the root domain DN (e.g., DC=sub,DC=tld)
+        """
+        parts = fqdn.split('.')
+        root = parts[-2:]
+        dn = ','.join(f"DC={p}" for p in root)
+        return dn
+
+    
     def _query_enumeration(
         self, remoteName: str, nmf: ms_nmf.NMFConnection, query: str, attributes: list,
         base_object_dn_for_soap: str | None = None, use_schema=False # MODIFIÉ: Ajout du paramètre
     ) -> str | None:
         fAttributes: str = "".join([f"<ad:SelectionProperty>addata:{attr}</ad:SelectionProperty>\n" for attr in attributes])
         
-        forest_dn = ",".join([f"DC={i}" for i in self._domain.split(".")])
+        forest_dn=self.get_root_domain_dn(self._domain)
         if use_schema:
             effective_base_obj = f"CN=Schema,CN=Configuration,{forest_dn}"
         else:
