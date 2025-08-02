@@ -3,7 +3,7 @@ import logging
 import socket
 from base64 import b64decode
 from enum import IntFlag
-from typing import Self, Type # Self est pour Python 3.11+
+from typing import Self, Type  # Self is for Python 3.11+
 from uuid import UUID, uuid4
 from xml.etree import ElementTree
 
@@ -18,19 +18,20 @@ from impacket.ldap.ldaptypes import (
 )
 from pyasn1.type.useful import GeneralizedTime
 
-# Assurez-vous que ces imports relatifs fonctionnent avec votre structure de projet
-# Si adws.py est dans src/, alors les imports suivants sont corrects si ms_nmf, ms_nns, soap_templates sont aussi dans src/
-# Sinon, ajustez les chemins. Par exemple, from .ms_nmf import ... si dans le même dossier.
-import soaphound.ad.ms_nmf as ms_nmf 
-from .ms_nns import NNS   
-from .soap_templates import ( 
+# Make sure these relative imports work with your project structure
+# If adws.py is in src/, then the following imports are correct if ms_nmf, ms_nns, soap_templates are also in src/
+# Otherwise, adjust the paths. For example, from .ms_nmf import ... if in the same folder.
+import soaphound.ad.ms_nmf as ms_nmf
+from .ms_nns import NNS
+from .soap_templates import (
     LDAP_PULL_FSTRING,
     LDAP_PUT_FSTRING,
     LDAP_QUERY_FSTRING,
     NAMESPACES,
+    LDAP_ROOT_DSE_FSTRING,
 )
 
-# --- Enumérations et Constantes (tirées de votre fichier original) ---
+# --- Enums and Constants (from your original file) ---
 class SystemFlags(IntFlag):
     NONE = 0x00000000
     NO_REPLICATION = 0x00000001
@@ -118,7 +119,7 @@ WELL_KNOWN_SIDS = {
     "S-1-5-6": "Service", "S-1-5-7": "Anonymous", "S-1-5-8": "Proxy",
     "S-1-5-9": "Enterprise Domain Controllers", "S-1-5-10": "Principal Self",
     "S-1-5-11": "Authenticated Users", "S-1-5-12": "Restricted Code", "S-1-5-13": "Terminal Server Users",
-    "S-1-5-14": "Remote Interactive Logon", "S-1-5-15": "This Organization", "S-1-5-17": "This Organization", # IIS_USRS
+    "S-1-5-14": "Remote Interactive Logon", "S-1-5-15": "This Organization", "S-1-5-17": "This Organization",  # IIS_USRS
     "S-1-5-18": "Local System", "S-1-5-19": "NT Authority", "S-1-5-20": "NT Authority",
     "S-1-5-32-544": "Administrators", "S-1-5-32-545": "Users", "S-1-5-32-546": "Guests",
     "S-1-5-32-547": "Power Users", "S-1-5-32-548": "Account Operators", "S-1-5-32-549": "Server Operators",
@@ -139,7 +140,7 @@ WELL_KNOWN_SIDS = {
     "S-1-5-32-577": "BUILTIN\\RDS Management Servers", "S-1-5-32-578": "BUILTIN\\Hyper-V Administrators",
     "S-1-5-32-579": "BUILTIN\\Access Control Assistance Operators", "S-1-5-32-580": "BUILTIN\\Remote Management Users",
 }
-# --- Fin Enumérations et Constantes ---
+# --- End Enums and Constants ---
 
 class ADWSError(Exception): ...
 class ADWSAuthType: ...
@@ -156,7 +157,7 @@ class NTLMAuth(ADWSAuthType):
 class ADWSConnect:
     def __init__(self, fqdn: str, domain: str, username: str, auth: NTLMAuth, resource: str ):
         self._fqdn = fqdn
-        self._domain = domain 
+        self._domain = domain
         self._username = username
         self._auth = auth
         self._resource: str = resource
@@ -177,7 +178,7 @@ class ADWSConnect:
         except Exception as e:
             logging.error(f"Failed to connect to {remoteName}:{server_address[1]}: {e}")
             raise ADWSError(f"Connection failed: {e}")
-        
+
         nmf = ms_nmf.NMFConnection(self._create_NNS_from_auth(sock), fqdn=remoteName)
         try:
             nmf.connect(f"Windows/{resource}")
@@ -196,74 +197,156 @@ class ADWSConnect:
         dn = ','.join(f"DC={p}" for p in root)
         return dn
 
-    
     def _query_enumeration(
         self, remoteName: str, nmf: ms_nmf.NMFConnection, query: str, attributes: list,
-        base_object_dn_for_soap: str | None = None, use_schema=False # MODIFIÉ: Ajout du paramètre
+        base_object_dn_for_soap: str | None = None, use_schema=False, schema_dn: str | None = None
     ) -> str | None:
         fAttributes: str = "".join([f"<ad:SelectionProperty>addata:{attr}</ad:SelectionProperty>\n" for attr in attributes])
-        
-        forest_dn=self.get_root_domain_dn(self._domain)
-        if use_schema:
-            effective_base_obj = f"CN=Schema,CN=Configuration,{forest_dn}"
-        else:
 
+        if use_schema:
+            if schema_dn is not None:
+                effective_base_obj = schema_dn
+            else:
+                forest_dn = self.get_root_domain_dn(self._domain)
+                effective_base_obj = f"CN=Schema,CN=Configuration,{forest_dn}"
+        else:
             effective_base_obj = base_object_dn_for_soap if base_object_dn_for_soap else ",".join([f"DC={i}" for i in self._domain.split(".")])
-        
-        #logging.debug(f"ADWS Query BaseObject: {effective_base_obj} for query: {query}")
 
         query_vars = {
             "uuid": str(uuid4()), "fqdn": remoteName, "query": query,
-            "attributes": fAttributes, "baseobj": effective_base_obj, # UTILISÉ ICI
+            "attributes": fAttributes, "baseobj": effective_base_obj,
         }
         enumeration_request_soap = LDAP_QUERY_FSTRING.format(**query_vars)
-        
-        #logging.debug(f"Sending Enumeration Request (first 200 chars): {enumeration_request_soap[:200]}...")
+
         nmf.send(enumeration_request_soap)
         enumerationResponse = nmf.recv()
-        #logging.debug(f"Received Enumeration Response (first 200 chars): {enumerationResponse[:200]}...")
 
         et = self._handle_str_to_xml(enumerationResponse)
-        if et is None: 
+        if et is None:
             logging.error("Failed to parse XML from enumeration response.")
             return None
-        
+
         enum_ctx_elem = et.find(".//wsen:EnumerationContext", NAMESPACES)
         if enum_ctx_elem is None or enum_ctx_elem.text is None:
             logging.error("No EnumerationContext found in the server response.")
-            if enumerationResponse and len(enumerationResponse) < 1000: # Loguer si la réponse est petite
-                 logging.debug(f"Full Enumeration Response without context: {enumerationResponse}")
+            if enumerationResponse and len(enumerationResponse) < 1000:
+                logging.debug(f"Full Enumeration Response without context: {enumerationResponse}")
             return None
         return enum_ctx_elem.text
-   
+
+    def get_schema_naming_context(self, remoteName: str, nmf: ms_nmf.NMFConnection) -> str:
+        from xml.etree import ElementTree as ET
+        from uuid import uuid4
+
+        req = {
+            "uuid": str(uuid4()),
+            "fqdn": remoteName,
+        }
+        soap_request = LDAP_ROOT_DSE_FSTRING.format(**req)
+
+        nmf.send(soap_request)
+        response = nmf.recv()
+
+        try:
+            et = ET.fromstring(response)
+        except Exception as e:
+            raise RuntimeError(f"Error parsing RootDSE: {e}\nRaw response: {response[:500]}")
+
+        NAMESPACES = {
+            'addata': "http://schemas.microsoft.com/2008/1/ActiveDirectory/Data",
+            'ad': "http://schemas.microsoft.com/2008/1/ActiveDirectory",
+        }
+
+        # Look for schemaNamingContext in the XML (value in <ad:value>)
+        val_elem = et.find(".//addata:schemaNamingContext/ad:value", namespaces=NAMESPACES)
+        if val_elem is not None and val_elem.text:
+            return val_elem.text.strip()
+
+        # Fallback: look in namingContexts (value in <ad:value>)
+        for alt_val in et.findall(".//addata:namingContexts/ad:value", namespaces=NAMESPACES):
+            if alt_val is not None and alt_val.text and "Schema" in alt_val.text:
+                return alt_val.text.strip()
+
+        raise RuntimeError(
+            f"schemaNamingContext not found in RootDSE. Raw response:\n{response[:1000]}"
+        )
+
+    def get_rootdse_contexts(self, remoteName: str, nmf: ms_nmf.NMFConnection) -> dict:
+        """
+        Gets key contexts from RootDSE in a single Resource request.
+        Returns a dict with fields:
+        - schemaNamingContext
+        - rootDomainNamingContext
+        - configurationNamingContext
+        - defaultNamingContext
+        - namingContexts (list)
+        All values are strings (or list of strings for namingContexts).
+        """
+        from xml.etree import ElementTree as ET
+        from uuid import uuid4
+
+        req = {
+            "uuid": str(uuid4()),
+            "fqdn": remoteName,
+        }
+        soap_request = LDAP_ROOT_DSE_FSTRING.format(**req)
+
+        nmf.send(soap_request)
+        response = nmf.recv()
+
+        try:
+            et = ET.fromstring(response)
+        except Exception as e:
+            raise RuntimeError(f"Error parsing RootDSE: {e}\nRaw response: {response[:500]}")
+
+        NAMESPACES = {
+            'addata': "http://schemas.microsoft.com/2008/1/ActiveDirectory/Data",
+            'ad': "http://schemas.microsoft.com/2008/1/ActiveDirectory",
+        }
+
+        def getval(xpath):
+            val_elem = et.find(xpath, namespaces=NAMESPACES)
+            return val_elem.text.strip() if val_elem is not None and val_elem.text else None
+
+        def getvals(xpath):
+            return [
+                v.text.strip()
+                for v in et.findall(xpath, namespaces=NAMESPACES)
+                if v is not None and v.text
+            ]
+
+        return {
+            "schemaNamingContext": getval(".//addata:schemaNamingContext/ad:value"),
+            "rootDomainNamingContext": getval(".//addata:rootDomainNamingContext/ad:value"),
+            "configurationNamingContext": getval(".//addata:configurationNamingContext/ad:value"),
+            "defaultNamingContext": getval(".//addata:defaultNamingContext/ad:value"),
+            "namingContexts": getvals(".//addata:namingContexts/ad:value"),
+    }
+
 
     def _pull_results(self, remoteName: str, nmf: ms_nmf.NMFConnection, enum_ctx: str) -> tuple[ElementTree.Element | None, bool]:
         pull_vars = {"uuid": str(uuid4()), "fqdn": remoteName, "enum_ctx": enum_ctx}
         pull_request_soap = LDAP_PULL_FSTRING.format(**pull_vars)
-        
-        #logging.debug(f"Sending Pull Request for context: {enum_ctx[:20]}...")
+
         nmf.send(pull_request_soap)
         pullResponse = nmf.recv()
-        #logging.debug(f"Received Pull Response (first 200 chars): {pullResponse[:200]}...")
 
         et = self._handle_str_to_xml(pullResponse)
-        if et is None: 
+        if et is None:
             logging.error(f"Failed to parse XML from pull response for context: {enum_ctx}")
-            return (None, False) 
-        
+            return (None, False)
+
         final_pkt = et.find(".//wsen:EndOfSequence", namespaces=NAMESPACES)
-        return (et, final_pkt is None) # True if more results (EndOfSequence NOT found)
+        return (et, final_pkt is None)  # True if more results (EndOfSequence NOT found)
 
     def _handle_str_to_xml(self, xmlstr: str) -> ElementTree.Element | None:
         if not xmlstr:
             logging.error("Received empty XML string from server.")
             return None
         try:
-            # Tenter de parser en premier. Si une faute est présente, elle sera dans l'arbre.
             parsed_et = ElementTree.fromstring(xmlstr)
-            
-            # Vérifier explicitement la présence d'une faute SOAP
-            # Utiliser les deux préfixes courants pour l'enveloppe SOAP
+
+            # Explicitly check for SOAP fault
             fault_node_s = parsed_et.find(f".//{{{NAMESPACES['s']}}}Fault")
             fault_node_soapenv = parsed_et.find(f".//{{{NAMESPACES['soapenv']}}}Fault")
             fault_node = fault_node_s if fault_node_s is not None else fault_node_soapenv
@@ -272,26 +355,26 @@ class ADWSConnect:
                 reason_text_s = fault_node.findtext(f".//{{{NAMESPACES['s']}}}Reason/{{{NAMESPACES['s']}}}Text")
                 reason_text_soapenv = fault_node.findtext(f".//{{{NAMESPACES['soapenv']}}}Reason/{{{NAMESPACES['soapenv']}}}Text")
                 reason = reason_text_s or reason_text_soapenv or "Unknown SOAP Fault reason"
-                
+
                 detail_node_s = fault_node.find(f".//{{{NAMESPACES['s']}}}Detail")
                 detail_node_soapenv = fault_node.find(f".//{{{NAMESPACES['soapenv']}}}Detail")
                 detail_node = detail_node_s if detail_node_s is not None else detail_node_soapenv
                 detail_text = ElementTree.tostring(detail_node, encoding='unicode').strip() if detail_node is not None else "No detail"
-                
+
                 logging.error(f"SOAP Fault received: {reason}\nDetail: {detail_text}")
-                return None # Indiquer une faute, ne pas continuer le parsing normal
-            
-            return parsed_et # Pas de faute explicitement trouvée, retourner l'arbre parsé
+                return None
+
+            return parsed_et
         except ElementTree.ParseError as e_parse:
             logging.error(f"XML ParseError in _handle_str_to_xml: {e_parse}. XML (first 500 chars): {xmlstr[:500]}")
-            # Tenter une extraction manuelle du message d'erreur si le parsing échoue complètement
-            if ":Text" in xmlstr: # Recherche simple
-                 start_tag_search = xmlstr.find(":Text>") # Cherche la fin du tag ouvrant
-                 if start_tag_search != -1:
+            # Try to manually extract the error message if parsing completely fails
+            if ":Text" in xmlstr:
+                start_tag_search = xmlstr.find(":Text>")
+                if start_tag_search != -1:
                     starttag = start_tag_search + len(":Text>")
-                    endtag = xmlstr.find("</", starttag) # Chercher la fin du tag textuel
+                    endtag = xmlstr.find("</", starttag)
                     if endtag != -1:
-                        fault_text = xmlstr[starttag : endtag]
+                        fault_text = xmlstr[starttag: endtag]
                         logging.error(f"Manually extracted text (possibly fault): {fault_text.strip()}")
             return None
 
@@ -304,19 +387,18 @@ class ADWSConnect:
             flags = [flag.name for flag in intflag_class if flag.value & value]
             return f"{value} ({', '.join(flags)})" if flags else str(value)
         except ValueError:
-            return str(value_str) 
+            return str(value_str)
 
     def _pretty_print_response(self, et: ElementTree.Element, print_synthetic_vars: bool = False) -> None:
-      #  logging.debug(f"Pretty print for batch XML (root: {et.tag if et is not None else 'None'})...")
-        if et is None: return
+        if et is None:
+            return
         items_container = et.find(".//wsen:Items", NAMESPACES)
         if items_container is not None:
-            for item in items_container: 
+            for item in items_container:
                 dn_elem = item.find(".//addata:distinguishedName/ad:value", NAMESPACES)
                 dn = dn_elem.text if dn_elem is not None else "Unknown DN"
-                #logging.debug(f"  [ADWS Raw Object] DN: {dn} (Type: {self._get_tag_name(item)})")
 
-    def put(self, object_ref: str, operation: str, attribute: str, data_type: str, value: str ) -> bool:
+    def put(self, object_ref: str, operation: str, attribute: str, data_type: str, value: str) -> bool:
         if self._resource != "Resource":
             raise NotImplementedError("Put is only supported on 'put' (Resource) clients")
         put_vars = {
@@ -331,44 +413,39 @@ class ADWSConnect:
         if not et:
             logging.error(f"Failed to parse response for PUT operation on {object_ref}")
             return False
-        
+
         body_s = et.find(f".//{{{NAMESPACES['s']}}}Body")
         body_soapenv = et.find(f".//{{{NAMESPACES['soapenv']}}}Body")
         body = body_s if body_s is not None else body_soapenv
 
-        # Un succès est souvent un corps vide ou une réponse PutResponse vide
         is_empty_body = (body is None or len(body) == 0 and (body.text is None or body.text.strip() == ""))
         has_put_response = body.find(f".//{{{NAMESPACES['wxf']}}}PutResponse") is not None if body is not None else False
-        
+
         return is_empty_body or has_put_response
 
-    # MODIFIÉ pour accepter et passer base_object_dn_for_soap et ajuster la journalisation
     def pull(
-        self, query: str, attributes: list, 
+        self, query: str, attributes: list,
         print_incrementally: bool = False,
-        base_object_dn_for_soap: str | None = None , use_schema=False# AJOUTÉ
+        base_object_dn_for_soap: str | None = None, use_schema=False
     ) -> ElementTree.Element | None:
         if self._resource != "Enumeration":
             raise NotImplementedError("Pull is only supported on 'pull' (Enumeration) clients")
         if use_schema:
             enum_ctx = self._query_enumeration(
-            remoteName=self._fqdn, nmf=self._nmf, query=query, 
-            attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap, use_schema=True # PASSÉ ICI
-        )
+                remoteName=self._fqdn, nmf=self._nmf, query=query,
+                attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap, use_schema=True
+            )
         else:
-
             enum_ctx = self._query_enumeration(
-            remoteName=self._fqdn, nmf=self._nmf, query=query, 
-            attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap # PASSÉ ICI
-        )
+                remoteName=self._fqdn, nmf=self._nmf, query=query,
+                attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap
+            )
         if enum_ctx is None:
-            # _query_enumeration logue déjà l'erreur
-            return None 
+            return None
 
         ElementTree.register_namespace("wsen", NAMESPACES["wsen"])
-        # Créer un élément racine correctement nommé avec son espace de noms pour agréger les items.
         aggregated_items_root = ElementTree.Element(f"{{{NAMESPACES['wsen']}}}Items")
-        
+
         more_results_expected = True
         batches_processed = 0
         total_items_in_all_batches = 0
@@ -376,39 +453,38 @@ class ADWSConnect:
         while more_results_expected:
             batches_processed += 1
             logging.debug(f"Pulling batch {batches_processed} for context {enum_ctx[:20]}...")
-            
+
             batch_xml_response_et, more_results_expected = self._pull_results(
                 remoteName=self._fqdn, nmf=self._nmf, enum_ctx=enum_ctx
             )
 
-            if batch_xml_response_et is None: 
+            if batch_xml_response_et is None:
                 logging.error(f"Error occurred while pulling batch {batches_processed}. Aborting pull for this context.")
-                break 
+                break
 
             items_in_batch_container = batch_xml_response_et.find(".//wsen:Items", NAMESPACES)
-            
+
             current_batch_item_count = 0
             if items_in_batch_container is not None:
-                for actual_ad_object_element in list(items_in_batch_container): # list() pour copier avant de modifier l'arbre
-                    aggregated_items_root.append(actual_ad_object_element) # Ajouter l'élément lui-même
-                    current_batch_item_count +=1
+                for actual_ad_object_element in list(items_in_batch_container):
+                    aggregated_items_root.append(actual_ad_object_element)
+                    current_batch_item_count += 1
                 total_items_in_all_batches += current_batch_item_count
-            
+
             logging.debug(f"Batch {batches_processed} contained {current_batch_item_count} items. More results expected: {more_results_expected}")
 
             if print_incrementally and current_batch_item_count > 0 and items_in_batch_container is not None:
-                # Pour pretty_print_response, il faut un ElementTree complet, donc on peut lui passer le conteneur du lot
                 temp_root_for_print = ElementTree.Element("RootForPrint")
                 temp_items_for_print = ElementTree.SubElement(temp_root_for_print, f"{{{NAMESPACES['wsen']}}}Items")
-                for el in items_in_batch_container: temp_items_for_print.append(el) # Copier les éléments pour l'impression
+                for el in items_in_batch_container:
+                    temp_items_for_print.append(el)
                 self._pretty_print_response(temp_root_for_print)
-
 
         if total_items_in_all_batches == 0:
             logging.warning(f"Query '{query}' with base '{base_object_dn_for_soap or self._domain}' resulted in 0 objects collected overall.")
         else:
             logging.debug(f"Finished pulling all batches for query '{query}'. Total items aggregated: {total_items_in_all_batches}")
-        
+
         return aggregated_items_root
 
     @classmethod
@@ -418,7 +494,7 @@ class ADWSConnect:
     @classmethod
     def put_client(cls, ip: str, domain: str, username: str, auth: NTLMAuth) -> Self:
         return cls(ip, domain, username, auth, "Resource")
-    
+
     @classmethod
     def create_client(cls, ip: str, domain: str, username: str, auth: NTLMAuth) -> Self:
         raise NotImplementedError()
