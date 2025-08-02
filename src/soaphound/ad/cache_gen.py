@@ -7,9 +7,7 @@ from soaphound.ad.soap_templates import NAMESPACES
 from base64 import b64decode, b64encode
 from impacket.ldap.ldaptypes import LDAP_SID
 
-#from src.acls import ACCESS_MASK, SecurityDescriptor, ACCESS_ALLOWED_OBJECT_ACE, ACE, parse_binary_acl, normalize_name
 from soaphound.ad.acls import parse_binary_acl
-
 
 SOAPHOUND_LDAP_PROPERTIES = sorted(list(set([
     "name", "sAMAccountName", "cn", "dNSHostName", "objectSid", "objectGUID",
@@ -23,7 +21,6 @@ SOAPHOUND_LDAP_PROPERTIES = sorted(list(set([
     "trustAttributes", "trustDirection", "trustPartner", "flatName", "securityIdentifier",
     "instanceType", "whenChanged", "uSNChanged", "mail",
 ])))
-
 
 SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT = {
     "user": 0, "computer": 1, "group": 2, "grouppolicycontainer": 3,
@@ -40,7 +37,10 @@ SOAPHOUND_OBJECT_CLASS_PRIORITY = [
     "container", "rpccontainer", "builtindomain"
 ]
 
-KNOWN_BINARY_ADWS_ATTRIBUTES = ["objectsid", "objectguid", "ntsecuritydescriptor", "sidhistory", "cacertificate", "pkiexpirationperiod", "pkioverlapperiod", "msds-allowedtoactonbehalfofotheridentity"]
+KNOWN_BINARY_ADWS_ATTRIBUTES = [
+    "objectsid", "objectguid", "ntsecuritydescriptor", "sidhistory",
+    "cacertificate", "pkiexpirationperiod", "pkioverlapperiod", "msds-allowedtoactonbehalfofotheridentity"
+]
 
 BH_TYPE_LABEL_MAP = {
     0: "User", 1: "Computer", 2: "Group", 3: "Gpo",
@@ -48,33 +48,27 @@ BH_TYPE_LABEL_MAP = {
     8: "CA", 9: "CertTemplate",
 }
 
-
-
-
 def generate_caches(all_objects):
     value_to_id_cache = {}
     id_to_type_cache = {}
     for obj in all_objects:
-
         dn = obj.get("distinguishedName")
         sid = None
         if obj.get("objectSid"):
-            from impacket.ldap.ldaptypes import LDAP_SID
             sid = LDAP_SID(obj["objectSid"]).formatCanonical()
         elif obj.get("objectGUID"):
-            from uuid import UUID
             sid = str(UUID(bytes_le=obj["objectGUID"])).upper()
         else:
             continue
 
-        # Recherche du type BH (numérique) à partir du mapping
+        # Find the BH type (integer) from mapping
         typ = None
         object_class = obj.get("objectClass", [])
         if isinstance(object_class, str):
             object_class = [object_class]
         object_class = [oc.lower() for oc in object_class]
 
-        # Recherche le type le plus "fort" trouvé dans la liste des objectClass
+        # Get the strongest type found in the objectClass list
         for oc in object_class:
             if oc in BH_TYPE_LABEL_MAP:
                 typ = BH_TYPE_LABEL_MAP[oc]
@@ -86,8 +80,11 @@ def generate_caches(all_objects):
 
     return value_to_id_cache, id_to_type_cache
 
-
 def pull_all_ad_objects(ip: str, domain: str, username: str, auth: NTLMAuth, query: str, attributes: list, base_dn_override: str = None):
+    """
+    Pulls all AD objects using ADWS for the given query and attributes.
+    Always provide defaultNamingContext (real base DN) via base_dn_override.
+    """
     effective_base_dn = base_dn_override if base_dn_override else "DC=" + ",DC=".join(domain.split('.'))
     logging.debug(f"Collecting AD objects. Domain: {domain}, Query: '{query}', Base DN: {effective_base_dn}, Attributes: {len(attributes)}")
     pull_client = ADWSConnect.pull_client(ip, domain, username, auth)
@@ -95,7 +92,7 @@ def pull_all_ad_objects(ip: str, domain: str, username: str, auth: NTLMAuth, que
     pull_et_root_items = pull_client.pull(query=query, attributes=attributes, base_object_dn_for_soap=effective_base_dn)
     if pull_et_root_items is None:
         logging.error(f"ADWSConnect.pull returned None for query '{query}' and base '{effective_base_dn}'.")
-        return {"objects": [], "domain_root_dn": "DC=" + ",DC=".join(domain.split('.')), "effective_base_dn_used": effective_base_dn}
+        return {"objects": [], "domain_root_dn": effective_base_dn, "effective_base_dn_used": effective_base_dn}
     for item_elem in pull_et_root_items:
         obj_data = {}
         for attr_name_original_case in attributes:
@@ -120,22 +117,22 @@ def pull_all_ad_objects(ip: str, domain: str, username: str, auth: NTLMAuth, que
                     obj_data[attr_name_original_case] = values[0] if len(values) == 1 and not isinstance(values[0], list) else values
         if 'distinguishedName' not in obj_data:
             dn_elem = item_elem.find(".//addata:distinguishedName/ad:value", namespaces=NAMESPACES)
-            if dn_elem is not None and dn_elem.text is not None: obj_data['distinguishedName'] = dn_elem.text
+            if dn_elem is not None and dn_elem.text is not None:
+                obj_data['distinguishedName'] = dn_elem.text
         if 'objectClass' not in obj_data:
             oc_val = [oc.text for oc in item_elem.findall(".//addata:objectClass/ad:value", namespaces=NAMESPACES) if oc.text]
-            if oc_val: obj_data['objectClass'] = oc_val
+            if oc_val:
+                obj_data['objectClass'] = oc_val
         if obj_data.get('distinguishedName'):
             all_pulled_items.append(obj_data)
     logging.debug(f"Parsed {len(all_pulled_items)} objects from ADWS response for query '{query}' (Base DN target: {effective_base_dn}).")
-    return {"objects": all_pulled_items, "domain_root_dn": "DC=" + ",DC=".join(domain.split('.')),  "effective_base_dn_used": effective_base_dn}
+    return {"objects": all_pulled_items, "domain_root_dn": effective_base_dn, "effective_base_dn_used": effective_base_dn}
 
-
-def adws_objecttype_guid_map(adws) -> dict:
+def adws_objecttype_guid_map(adws, schema_dn) -> dict:
     """
-    Récupère la map lDAPDisplayName → schemaIDGUID (au format string) via ADWS
-    pour classSchema et attributeSchema.
+    Retrieves the lDAPDisplayName → schemaIDGUID map (as string) via ADWS for classSchema and attributeSchema.
+    schema_dn MUST be passed from the main script (do not fetch it here).
     """
-
     query = "(objectClass=*)"
     attributes = ["name", "schemaIDGUID", "lDAPDisplayName"]
     mapping = {}
@@ -144,8 +141,7 @@ def adws_objecttype_guid_map(adws) -> dict:
         "ns2": "http://schemas.microsoft.com/2008/1/ActiveDirectory",
     }
 
-    # -- classSchema --
-    et_classes = adws.pull(query, attributes, use_schema=True)
+    et_classes = adws.pull(query, attributes, use_schema=True, base_object_dn_for_soap=schema_dn)
     if et_classes is not None:
         for item in et_classes.findall(".//ns1:classSchema", NAMESPACES):
             ldn = item.find(".//ns1:lDAPDisplayName/ns2:value", NAMESPACES)
@@ -159,7 +155,7 @@ def adws_objecttype_guid_map(adws) -> dict:
                     pass
 
     # -- attributeSchema --
-    et_attrs = adws.pull(query, attributes, use_schema=True)
+    et_attrs = adws.pull(query, attributes, use_schema=True, base_object_dn_for_soap=schema_dn)
     if et_attrs is not None:
         for item in et_attrs.findall(".//ns1:attributeSchema", NAMESPACES):
             ldn = item.find(".//ns1:lDAPDisplayName/ns2:value", NAMESPACES)
@@ -184,7 +180,6 @@ def _generate_individual_caches(all_pulled_items, domain_root_dn):
         raw_guid_bytes = obj.get('objectGUID')
         object_classes = obj.get('objectClass', [])
 
-        # Format SID
         sid_str = None
         if isinstance(raw_sid_bytes, bytes):
             try: sid_str = LDAP_SID(raw_sid_bytes).formatCanonical()
@@ -192,17 +187,12 @@ def _generate_individual_caches(all_pulled_items, domain_root_dn):
         elif isinstance(raw_sid_bytes, str):
             if raw_sid_bytes.upper().startswith("S-1-"):
                 sid_str = raw_sid_bytes.upper()
-        # Format GUID
         guid_str = None
         if isinstance(raw_guid_bytes, bytes):
             try: guid_str = str(UUID(bytes_le=raw_guid_bytes))
             except Exception as e: guid_str = f"<GUID decode error: {e}>"
         elif isinstance(raw_guid_bytes, str) and len(raw_guid_bytes) == 36:
             guid_str = raw_guid_bytes.lower()
-
-       # print(f"[DEBUG][CACHE] #{idx+1} DN: {dn}")
-       # print(f"    SID : {sid_str}")
-        #print(f"    GUID: {guid_str}")
 
         primary_id = sid_str if sid_str else guid_str
         oc_lower_list_for_check = [str(oc).lower() for oc in object_classes] if isinstance(object_classes, list) else ([str(object_classes).lower()] if object_classes else [])
@@ -226,7 +216,6 @@ def _generate_individual_caches(all_pulled_items, domain_root_dn):
     logging.debug(f"Generated {len(id_to_type_cache)} IdToType mappings and {len(value_to_id_cache)} ValueToId mappings.")
     return id_to_type_cache, value_to_id_cache
 
-
 def get_soaphound_type_id(dn, object_classes, object_sid_str, domain_root_dn):
     if not isinstance(object_classes, list): object_classes = [object_classes]
     object_classes_lower = [str(oc).lower() for oc in object_classes]
@@ -241,8 +230,7 @@ def get_soaphound_type_id(dn, object_classes, object_sid_str, domain_root_dn):
             type_id = SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get(oc_priority)
             if type_id is not None: return type_id
     if "container" in object_classes_lower: return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("container", 6)
-    return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("container", 6) 
-
+    return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("container", 6)
 
 def _ldap_datetime_to_epoch(ldap_timestamp_val, is_lastlogontimestamp=False):
     if not ldap_timestamp_val or str(ldap_timestamp_val) in ['0', '9223372036854775807', '-1', '']:
@@ -269,11 +257,9 @@ def _parse_aces(ntsd_bytes, id_to_type_cache, current_object_id, object_type_lab
         return [], False
     if object_type_guid_map is None:
         object_type_guid_map = {}
-    # Prepare entry and entrytype
     entry = {"Properties": {"haslaps": bool(has_laps_prop)}}
-    # Normalize entrytype string for BH
     et = object_type_label_for_ace.lower()
-    if et == "ou": 
+    if et == "ou":
         et = "organizational-unit"
     entry, relations = parse_binary_acl(entry, et, ntsd_bytes, object_type_guid_map)
     is_acl_protected = entry.get('IsACLProtected', False)
@@ -305,7 +291,6 @@ def _resolve_principal_type_from_cache(principal_id, id_to_type_cache, default_b
         if principal_id.upper().startswith("S-1-5-32-"): return "Group"
         if principal_id.upper() == "S-1-1-0": return "Group"
         if principal_id.upper() == "S-1-5-18": return "System"
-   # logging.debug(f"Could not resolve type for PrincipalID '{principal_id}' from cache, defaulting to '{default_bh_type}'.")
     return default_bh_type.capitalize()
 
 def _build_relation(sid, principal_type, rightname, inherited):
@@ -318,24 +303,21 @@ def _build_relation(sid, principal_type, rightname, inherited):
 
 def adws_object_classes(adws) -> set:
     """
-    Récupère toutes les objectClass du schéma via ADWS.
+    Retrieves all objectClass names from the schema via ADWS.
     """
     query = "(lDAPDisplayName=*)"
     attributes = ["lDAPDisplayName"]
     et = adws.pull(query, attributes, use_schema=True)
     if et is None:
-        logging.error("[adws_object_classes] Impossible de collecter les classes d'objets du schéma (use_schema)")
+        logging.error("[adws_object_classes] Unable to collect object classes from the schema (use_schema)")
         return set()
 
-    # Adapte les namespaces trouvés dans ton XML
     NAMESPACES = {
         "ns1": "http://schemas.microsoft.com/2008/1/ActiveDirectory/Data",
         "ns2": "http://schemas.microsoft.com/2008/1/ActiveDirectory",
     }
 
     classes = set()
-
-    # On parcourt tous les <ns1:classSchema>
     for item in et.findall(".//ns1:classSchema", NAMESPACES):
         ldn = item.find(".//ns1:lDAPDisplayName/ns2:value", NAMESPACES)
         if ldn is not None and ldn.text:
@@ -344,8 +326,8 @@ def adws_object_classes(adws) -> set:
 
 def filetime_to_unix(val):
     """
-    Convertit un champ de date AD (FILETIME ou format LDAP time string) en timestamp UNIX.
-    Si la valeur ne peut pas être convertie, retourne 0.
+    Converts an AD date field (FILETIME or LDAP time string) to UNIX timestamp.
+    If the value cannot be converted, returns 0.
     """
     if val is None:
         return 0
@@ -354,16 +336,16 @@ def filetime_to_unix(val):
     try:
         if isinstance(val, int):
             if val == 0:
-                return 0  # toujours 0 ici, la logique spéciale se fait à l'appel
+                return 0
             return int((val - 116444736000000000) / 10000000)
         if isinstance(val, str) and val.isdigit():
             val = int(val)
             if val == 0:
-                return 0  # pareil ici
+                return 0
             return int((val - 116444736000000000) / 10000000)
     except Exception:
         pass
-    # Format LDAP time string : "20241008201943.0Z"
+    # LDAP time string: "20241008201943.0Z"
     if isinstance(val, str) and "." in val and val.endswith("Z"):
         try:
             return int(datetime.strptime(val, "%Y%m%d%H%M%S.0Z").timestamp())
@@ -371,16 +353,19 @@ def filetime_to_unix(val):
             return 0
     return 0
 
-
 def create_and_combine_soaphound_cache(all_pulled_items, domain_root_dn, output_dir="."):
     combined_output_path = os.path.join(output_dir, "Cache.json")
+    # Ensure directory exists before writing
+    os.makedirs(output_dir, exist_ok=True)
     logging.info(f"Initiating SOAPHound cache generation to {combined_output_path}...")
     id_to_type_dict, value_to_id_dict = _generate_individual_caches(all_pulled_items, domain_root_dn)
     if not id_to_type_dict or not value_to_id_dict:
-        logging.error("Failed to generate individual cache dictionaries. Combined cache not created."); return
+        logging.error("Failed to generate individual cache dictionaries. Combined cache not created.")
+        return
     try:
         combined_data = {"IdToTypeCache": id_to_type_dict, "ValueToIdCache": value_to_id_dict}
         with open(combined_output_path, 'w', encoding='utf-8') as f:
             json.dump(combined_data, f, indent=2, ensure_ascii=False)
         logging.info(f"Cache.json saved to {combined_output_path}")
-    except IOError as e: logging.error(f"Error writing cache files: {e}")
+    except IOError as e:
+        logging.error(f"Error writing cache files: {e}")
