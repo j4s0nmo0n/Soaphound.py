@@ -5,6 +5,7 @@ from impacket.ldap.ldaptypes import LDAP_SID
 from soaphound.ad.cache_gen import pull_all_ad_objects, _ldap_datetime_to_epoch, _parse_aces, dedupe_aces,adws_objecttype_guid_map
 from soaphound.ad.adws import WELL_KNOWN_SIDS
 from .container import get_child_objects, BH_TYPE_LABEL_MAP
+from .trust import trust_to_bh_output
 
 def collect_domains(ip, domain, username, auth, base_dn_override=None):
     """
@@ -38,7 +39,7 @@ def prefix_well_known_sid(sid: str, domain_name: str, domain_sid: str, well_know
         return f"{domain_name.upper()}-{sid}"
     return sid
 
-def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value_to_id_cache, all_collected_items, objecttype_guid_map):
+def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value_to_id_cache, all_collected_items, objecttype_guid_map, all_trusts):
     # Construction du lookup DN parent -> enfants directs (containers, OUs, etc)
     childobjects_lookup = {}
     for obj in all_collected_items:
@@ -114,11 +115,19 @@ def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value
             "collected": True,
             "whencreated": _ldap_datetime_to_epoch(obj.get("whenCreated")),
         }
+        
+        # Find all trusts where the source domain SID matches this domain
+        trusts_for_domain = []
+        for trust in all_trusts:
+            # Compare the domain SID (make sure both are uppercase for robustness)
+            if trust.get("domainsid", "").upper() == domain_sid_str.upper():
+                trusts_for_domain.append(trust_to_bh_output(trust))
+
 
         domain_bh_entry = {
             "ObjectIdentifier": domain_sid_str,
             "Properties": props,
-            "Trusts": [],
+            "Trusts": trusts_for_domain,
             "Aces": aces_domain,
             "Links": main_domain_gplinks,
             #"ChildObjects": childobjects_lookup.get(dn.upper(), []),
