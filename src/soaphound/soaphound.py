@@ -15,7 +15,7 @@ from soaphound.ad.collectors.gpo import collect_gpos, format_gpos
 from soaphound.ad.collectors.ou import collect_ous, format_ous
 from soaphound.ad.collectors.group import collect_groups, format_groups
 from soaphound.ad.collectors.user import collect_users, format_users
-from soaphound.ad.collectors.trust import collect_trusts, format_trusts
+from soaphound.ad.collectors.trust import collect_trusts, trust_to_bh_output
 
 from soaphound.lib.utils import ObjectCache, DNSCache
 from soaphound.lib.authentication import ADAuthentication
@@ -168,14 +168,16 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     id_to_type_cache, value_to_id_cache = _generate_individual_caches(objs, default_dn)
 
     logging.info(f"Start collecting ...")
-    # Collect and format domains    
-    raw_domains = collect_domains(options.domain_controller, options.domain, options.username, auth)
-    domains_bh = format_domains(raw_domains, options.domain, default_dn, id_to_type_cache, value_to_id_cache, objs, objecttype_guid_map)
 
+    
+    # --- (1) Collect raw domains ---   
+    raw_domains = collect_domains(options.domain_controller, options.domain, options.username, auth)
+    
     # Collect and format containers
     raw_containers = collect_containers(options.domain_controller, options.domain, options.username, auth)
     containers_bh = format_containers(raw_containers, options.domain, default_dn, id_to_type_cache, value_to_id_cache, objs, objecttype_guid_map)
 
+    # --- (2) Get main domain SID for formatting trusts etc. ---
     domain_obj = raw_domains[0]  # If only one domain, otherwise adapt according to the context.
     sid_bytes = domain_obj.get("objectSid")
         
@@ -185,6 +187,21 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         domain_sid = sid_bytes.upper()
     else:
         raise RuntimeError("Unable to find the SID of the primary domain.")
+
+    collect_domain_args = {
+    "username": options.username,
+    "auth": auth
+    }
+
+    # Collect and format Trusts
+    trusts = collect_trusts(options.domain_controller, options.domain, options.username, auth, domain_sid=domain_sid)
+    
+
+    
+    print("Number of trusts collected:", len(trusts))
+    # --- (4) Format domains, inject trusts ---
+    domains_bh = format_domains(raw_domains, options.domain, default_dn, id_to_type_cache, value_to_id_cache, objs, objecttype_guid_map, trusts)
+
 
     # Collect and format GPOs
     gpos = collect_gpos(options.domain_controller, options.domain, options.username, auth)
@@ -202,10 +219,6 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     object_classes = adws_object_classes(adws_enum)
     users = collect_users(options.domain_controller, options.domain, options.username, auth, adws_object_classes=object_classes)
     users_bh = format_users(users, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
-
-    # Collect and format Trusts
-    trusts = collect_trusts(options.domain_controller, options.domain, options.username, auth)
-    trusts_bh = format_trusts(trusts, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
 
     # Collect and format Computers
     if (options.collectionmethod == "ADWSOnly"):
@@ -258,7 +271,6 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     safe_export_bloodhound_json(ous_bh, os.path.join(output_dir, timestamp + "ous.json"))
     safe_export_bloodhound_json(groups_bh, os.path.join(output_dir, timestamp + "groups.json"))
     safe_export_bloodhound_json(users_bh, os.path.join(output_dir, timestamp + "users.json"))
-    safe_export_bloodhound_json(trusts_bh, os.path.join(output_dir, timestamp + "trusts.json"))
     safe_export_bloodhound_json(computers_bh, os.path.join(output_dir, timestamp + "computers.json"))
 
     if options.zip:
