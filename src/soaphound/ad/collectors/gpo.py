@@ -1,7 +1,7 @@
 from uuid import UUID
 import unicodedata
 from impacket.ldap.ldaptypes import LDAP_SID
-from soaphound.ad.cache_gen import pull_all_ad_objects, _ldap_datetime_to_epoch, _parse_aces, adws_objecttype_guid_map
+from soaphound.ad.cache_gen import pull_all_ad_objects, filetime_to_unix, _parse_aces, adws_objecttype_guid_map
 from soaphound.ad.adws import WELL_KNOWN_SIDS
 import json
 import os
@@ -126,7 +126,7 @@ def format_gpos(
             "highvalue": False,
             "gpcpath": gpcpath or None,
             "description": description,
-            "whencreated": _ldap_datetime_to_epoch(obj.get("whenCreated")),
+            "whencreated": filetime_to_unix(obj.get("whenCreated")),
             "isaclprotected": is_acl_protected_gpo,
         }
 
