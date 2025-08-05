@@ -1,7 +1,7 @@
 from uuid import UUID
 import logging
 from impacket.ldap.ldaptypes import LDAP_SID
-from soaphound.ad.cache_gen import pull_all_ad_objects, _ldap_datetime_to_epoch, _parse_aces, dedupe_aces, filetime_to_unix, adws_objecttype_guid_map
+from soaphound.ad.cache_gen import pull_all_ad_objects, _parse_aces, dedupe_aces, filetime_to_unix, adws_objecttype_guid_map
 from soaphound.ad.adws import WELL_KNOWN_SIDS
 from soaphound.lib.utils import ADUtils
 
