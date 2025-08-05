@@ -1,6 +1,6 @@
 from uuid import UUID
 from impacket.ldap.ldaptypes import LDAP_SID
-from soaphound.ad.cache_gen import pull_all_ad_objects, _ldap_datetime_to_epoch, _parse_aces, filetime_to_unix, dedupe_aces, BH_TYPE_LABEL_MAP
+from soaphound.ad.cache_gen import pull_all_ad_objects, _parse_aces, filetime_to_unix, dedupe_aces, BH_TYPE_LABEL_MAP
 from soaphound.lib.utils import ADUtils, DNSCache
 from soaphound.ad.adws import WELL_KNOWN_SIDS
 from .bh_rpc_computer import ADComputer
