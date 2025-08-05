@@ -274,6 +274,7 @@ def _resolve_principal_type_from_cache(principal_id, id_to_type_cache, default_b
         if principal_id.upper().startswith("S-1-5-32-"): return "Group"
         if principal_id.upper() == "S-1-1-0": return "Group"
         if principal_id.upper() == "S-1-5-18": return "System"
+        if principal_id.upper() == "S-1-5-9": return "Group"
     return default_bh_type.capitalize()
 
 def _build_relation(sid, principal_type, rightname, inherited):
