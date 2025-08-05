@@ -14,7 +14,7 @@ def collect_domains(ip, domain, username, auth, base_dn_override=None, domain_fu
     """
     attributes = [
         "name", "objectGUID", "objectSid", "objectClass", "distinguishedName",
-        "nTSecurityDescriptor", "whenCreated", "cn", "gPLink", "msds-behavior-version"
+        "nTSecurityDescriptor", "whenCreated", "cn", "gPLink"
     ]
     domains = pull_all_ad_objects(
         ip=ip,
