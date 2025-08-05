@@ -1,6 +1,6 @@
 from uuid import UUID
 from impacket.ldap.ldaptypes import LDAP_SID
-from soaphound.ad.cache_gen import pull_all_ad_objects, _ldap_datetime_to_epoch
+from soaphound.ad.cache_gen import pull_all_ad_objects
 import json
 import base64
 
