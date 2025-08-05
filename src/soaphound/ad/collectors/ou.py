@@ -1,7 +1,7 @@
 from uuid import UUID
 import unicodedata
 from impacket.ldap.ldaptypes import LDAP_SID
-from soaphound.ad.cache_gen import pull_all_ad_objects, _ldap_datetime_to_epoch, _parse_aces, dedupe_aces,adws_objecttype_guid_map
+from soaphound.ad.cache_gen import pull_all_ad_objects, filetime_to_unix, _parse_aces, dedupe_aces,adws_objecttype_guid_map
 from .container import get_child_objects, BH_TYPE_LABEL_MAP
 from soaphound.ad.adws import WELL_KNOWN_SIDS
 import json
@@ -123,7 +123,7 @@ def format_ous(
             "domainsid": main_domain_sid,
             "highvalue": False,
             "description": description,
-            "whencreated": _ldap_datetime_to_epoch(obj.get("whenCreated")),
+            "whencreated": filetime_to_unix(obj.get("whenCreated")),
             "isaclprotected": is_acl_protected_ou,
         }
 
