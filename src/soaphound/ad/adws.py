@@ -321,6 +321,8 @@ class ADWSConnect:
             "configurationNamingContext": getval(".//addata:configurationNamingContext/ad:value"),
             "defaultNamingContext": getval(".//addata:defaultNamingContext/ad:value"),
             "namingContexts": getvals(".//addata:namingContexts/ad:value"),
+            "domainFunctionality": getvals(".//addata:domainFunctionality/ad:value"),
+            "forestFunctionality": getval(".//addata:forestFunctionality/ad:value")
     }
 
 
