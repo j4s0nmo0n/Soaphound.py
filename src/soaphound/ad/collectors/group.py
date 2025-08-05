@@ -1,6 +1,6 @@
 from uuid import UUID
 from impacket.ldap.ldaptypes import LDAP_SID
-from soaphound.ad.cache_gen import pull_all_ad_objects, _ldap_datetime_to_epoch, _parse_aces, dedupe_aces,BH_TYPE_LABEL_MAP, adws_objecttype_guid_map
+from soaphound.ad.cache_gen import pull_all_ad_objects, filetime_to_unix, _parse_aces, dedupe_aces,BH_TYPE_LABEL_MAP, adws_objecttype_guid_map
 from soaphound.ad.adws import WELL_KNOWN_SIDS
 import json
 import unicodedata
@@ -295,7 +295,7 @@ def format_groups(
             "samaccountname": samaccountname,
             "admincount": obj.get("adminCount", 0) == 1,
             "description": description,
-            "whencreated": _ldap_datetime_to_epoch(obj.get("whenCreated")),
+            "whencreated": filetime_to_unix(obj.get("whenCreated")),
         }
 
         group_bh_entry = {
