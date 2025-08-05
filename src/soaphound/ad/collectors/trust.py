@@ -6,8 +6,8 @@ import base64
 
 def collect_trusts(ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None, domain_sid=None):
     """
-    Collecte tous les objets trustedDomain depuis l'annuaire ou un cache.
-    Ajoute automatiquement le champ 'domainsid' à chaque trust si domain_sid est fourni.
+    Collect all trustedDomain objects from the directory or a cache.
+    Automatically add the 'domainsid' field to each trust if domain_sid is provided.
     """
     if cache_file:
         with open(cache_file, "r", encoding="utf-8") as f:
@@ -43,7 +43,7 @@ def collect_trusts(ip=None, domain=None, username=None, auth=None, base_dn_overr
         ).get("objects", [])
         trusts = [t for t in trusts if t.get("distinguishedName") and isinstance(t.get("distinguishedName"), str)]
 
-    # Ajout automatique du domainsid
+    # Automatic addition of domainsid
     if domain_sid is not None:
         for t in trusts:
             t["domainsid"] = domain_sid
