@@ -13,7 +13,7 @@ def collect_domains(ip, domain, username, auth, base_dn_override=None):
     """
     attributes = [
         "name", "objectGUID", "objectSid", "objectClass", "distinguishedName",
-        "nTSecurityDescriptor", "whenCreated", "cn"
+        "nTSecurityDescriptor", "whenCreated", "cn", "gPLink"
     ]
     domains = pull_all_ad_objects(
         ip=ip,
