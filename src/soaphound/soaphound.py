@@ -117,6 +117,11 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     root_domain_dn = contexts["rootDomainNamingContext"]
     config_dn = contexts["configurationNamingContext"]
     naming_contexts = contexts["namingContexts"]
+    vals = contexts["domainFunctionality"]
+    #Here we save domainFunctionality and ForestFunctionality value that we got from RootDSE request 
+    domainFunctionality = int(vals[0]) if vals else None
+    vals_forest = contexts["forestFunctionality"]
+    forestFunctionality = int(vals[0]) if vals_forest else None
 
     # 2. One Enumeration connection for all pulls
     adws_enum = ADWSConnect(options.domain_controller, options.domain, options.username, auth, "Enumeration")
@@ -200,7 +205,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     
     print("Number of trusts collected:", len(trusts))
     # --- (4) Format domains, inject trusts ---
-    domains_bh = format_domains(raw_domains, options.domain, default_dn, id_to_type_cache, value_to_id_cache, objs, objecttype_guid_map, trusts)
+    domains_bh = format_domains(raw_domains, options.domain, default_dn, id_to_type_cache, value_to_id_cache, objs, objecttype_guid_map, trusts, domain_functionality=domainFunctionality)
 
 
     # Collect and format GPOs
