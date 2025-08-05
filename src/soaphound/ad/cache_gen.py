@@ -232,25 +232,6 @@ def get_soaphound_type_id(dn, object_classes, object_sid_str, domain_root_dn):
     if "container" in object_classes_lower: return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("container", 6)
     return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("container", 6)
 
-def _ldap_datetime_to_epoch(ldap_timestamp_val, is_lastlogontimestamp=False):
-    if not ldap_timestamp_val or str(ldap_timestamp_val) in ['0', '9223372036854775807', '-1', '']:
-        return -1 if is_lastlogontimestamp else 0
-    try:
-        val_str = str(ldap_timestamp_val)
-        if '.' in val_str and val_str.endswith('Z'):
-            dt_format = "%Y%m%d%H%M%S.%fZ"
-            if sys.version_info < (3, 7) and 'Z' in val_str: val_str = val_str[:-1]; dt_format = "%Y%m%d%H%M%S.%f"
-            dt_obj = datetime.strptime(val_str, dt_format).replace(tzinfo=timezone.utc)
-            return int(dt_obj.timestamp())
-        else:
-            ft_int = int(val_str)
-            epoch_diff_seconds = 11644473600
-            timestamp_secs = (ft_int / 10000000.0) - epoch_diff_seconds
-            return int(timestamp_secs)
-    except Exception as e:
-        logging.debug(f"Error converting timestamp '{ldap_timestamp_val}': {e}")
-        return -1 if is_lastlogontimestamp else 0
-
 def _parse_aces(ntsd_bytes, id_to_type_cache, current_object_id, object_type_label_for_ace="Base",
                has_laps_prop=False, object_type_guid_map=None, extrights_guid_mapping=None):
     if not ntsd_bytes or not isinstance(ntsd_bytes, bytes):
@@ -333,6 +314,7 @@ def filetime_to_unix(val):
         return 0
     if isinstance(val, list):
         val = val[0] if val else 0
+    # Handle integer/filetime
     try:
         if isinstance(val, int):
             if val == 0:
@@ -345,13 +327,23 @@ def filetime_to_unix(val):
             return int((val - 116444736000000000) / 10000000)
     except Exception:
         pass
-    # LDAP time string: "20241008201943.0Z"
+    # Handle LDAP generalized time: "YYYYMMDDHHMMSS.0Z" or "YYYYMMDDHHMMSS.123456Z"
     if isinstance(val, str) and "." in val and val.endswith("Z"):
         try:
-            return int(datetime.strptime(val, "%Y%m%d%H%M%S.0Z").timestamp())
-        except Exception:
+            # .0Z case
+            if val.endswith(".0Z"):
+                return int(datetime.strptime(val, "%Y%m%d%H%M%S.0Z").replace(tzinfo=timezone.utc).timestamp())
+            # .xxxZ or .xxxxxxZ case
+            match = re.match(r"^(\d{14})\.(\d+)Z$", val)
+            if match:
+                main_dt, fraction = match.groups()
+                fraction = (fraction + "000000")[:6]  # pad to 6 digits
+                dt_str = f"{main_dt}.{fraction}Z"
+                dt_format = "%Y%m%d%H%M%S.%fZ"
+                return int(datetime.strptime(dt_str, dt_format).replace(tzinfo=timezone.utc).timestamp())
+        except Exception as e:
+            print(f"filetime_to_unix: failed to parse {val} - {e}")
             return 0
-    return 0
 
 def create_and_combine_soaphound_cache(all_pulled_items, domain_root_dn, output_dir="."):
     combined_output_path = os.path.join(output_dir, "Cache.json")
