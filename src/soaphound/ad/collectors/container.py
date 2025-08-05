@@ -1,6 +1,6 @@
 from uuid import UUID
 from impacket.ldap.ldaptypes import LDAP_SID
-from soaphound.ad.cache_gen import _ldap_datetime_to_epoch, _parse_aces, pull_all_ad_objects, BH_TYPE_LABEL_MAP, dedupe_aces, adws_objecttype_guid_map
+from soaphound.ad.cache_gen import filetime_to_unix, _parse_aces, pull_all_ad_objects, BH_TYPE_LABEL_MAP, dedupe_aces, adws_objecttype_guid_map
 import re
 import unicodedata
 import json
@@ -276,7 +276,7 @@ def format_containers(
             "domainsid": domainsid,
             "highvalue": highvalue,
             "description": description,
-            "whencreated": _ldap_datetime_to_epoch(obj.get("whenCreated")),
+            "whencreated": filetime_to_unix(obj.get("whenCreated")),
             "isaclprotected": isaclprotected,
         }
 
