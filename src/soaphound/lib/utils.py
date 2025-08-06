@@ -118,7 +118,8 @@ class ADUtils(object):
         4: "2008 R2",
         5: "2012",
         6: "2012 R2",
-        7: "2016"
+        7: "2016",
+        10: "2025" 
     }
 
     xml_sid_rex = re.compile('<UserId>(S-[0-9\\-]+)</UserId>')
