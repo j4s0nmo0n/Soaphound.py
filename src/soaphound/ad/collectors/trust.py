@@ -43,27 +43,37 @@ def collect_trusts(ip=None, domain=None, username=None, auth=None, base_dn_overr
         ).get("objects", [])
         trusts = [t for t in trusts if t.get("distinguishedName") and isinstance(t.get("distinguishedName"), str)]
 
-    # Automatic addition of domainsid
+    # Automatically add domainsid if provided
     if domain_sid is not None:
         for t in trusts:
             t["domainsid"] = domain_sid
 
-    print(f"[INFO] Trusts collected : {len(trusts)}")
+    print(f"[INFO] Trusts collected: {len(trusts)}")
     return trusts
+
+# Mapping for trust direction and type to string values expected by BloodHound CE
+TRUST_DIRECTION_MAP = {
+    0: "Disabled",
+    1: "Inbound",
+    2: "Outbound",
+    3: "Bidirectional"
+}
+
+TRUST_TYPE_MAP = {
+    0: "ParentChild",  # BloodHound.py sometimes uses 0 for ParentChild
+    1: "ParentChild",
+    2: "TreeRoot",
+    3: "External",
+    4: "Forest",
+    5: "Realm",
+    6: "MIT"
+}
 
 def trust_to_bh_output(trust_obj):
     """
-    Transform an LDAP trust object to BloodHound 'Trusts' format for domains.json,
-    using the same logic and flags as BloodHound.py.
+    Transform an LDAP trust object to BloodHound 'Trusts' format for domains.json.
+    Converts TrustDirection and TrustType to string values expected by BloodHound CE.
     """
-    # BloodHound trust type mapping
-    bh_trust_type = {
-        'ParentChild': 0,
-        'CrossLink': 1,
-        'Forest': 2,
-        'External': 3,
-        'Unknown': 4
-    }
     # All known trust flags
     TRUST_FLAGS = {
         'NON_TRANSITIVE': 0x00000001,
@@ -88,7 +98,7 @@ def trust_to_bh_output(trust_obj):
     sid_filtering = True
 
     flags = int(trust_obj.get("trustAttributes", 0) or 0)
-    # BloodHound.py logic for trust type and properties
+    # Logic for determining trust type and its properties
     if has_flag(flags, 'WITHIN_FOREST'):
         trusttype = 'ParentChild'
         is_transitive = True
@@ -104,8 +114,9 @@ def trust_to_bh_output(trust_obj):
     else:
         is_transitive = not has_flag(flags, 'NON_TRANSITIVE')
 
-    trusttype_out = bh_trust_type.get(trusttype, 4)
-    
+    # Get string representation for TrustType
+    trusttype_out = TRUST_TYPE_MAP.get(trust_obj.get("trustType", 0), "ParentChild")
+
     secid_raw = trust_obj.get('securityIdentifier')
     try:
         if secid_raw:
@@ -115,15 +126,20 @@ def trust_to_bh_output(trust_obj):
                 sid_full = LDAP_SID(base64.b64decode(secid_raw)).formatCanonical()
             else:
                 sid_full = str(secid_raw)
-    except Exception:
+        else:
             sid_full = ""
+    except Exception:
+        sid_full = ""
     
+    # Get string representation for TrustDirection
+    trust_direction_raw = int(trust_obj.get("trustDirection", 0) or 0)
+    trust_direction_out = TRUST_DIRECTION_MAP.get(trust_direction_raw, "Disabled")
+
     return {
         "TargetDomainName": (trust_obj.get("trustPartner") or trust_obj.get("flatName") or trust_obj.get("name", "")).upper(),
         "TargetDomainSid": sid_full,
         "IsTransitive": is_transitive,
-        "TrustDirection": int(trust_obj.get("trustDirection", 0) or 0),
+        "TrustDirection": trust_direction_out,
         "TrustType": trusttype_out,
         "SidFilteringEnabled": sid_filtering
     }
-
