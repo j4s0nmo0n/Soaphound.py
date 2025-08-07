@@ -3,6 +3,7 @@ import unicodedata
 from impacket.ldap.ldaptypes import LDAP_SID
 from soaphound.ad.cache_gen import pull_all_ad_objects, filetime_to_unix, _parse_aces, adws_objecttype_guid_map
 from soaphound.ad.adws import WELL_KNOWN_SIDS
+from soaphound.lib.utils import ADUtils
 import json
 import os
 
@@ -84,7 +85,7 @@ def format_gpos(
         gpo_guid = str(UUID(bytes_le=guid_bytes)).upper() if isinstance(guid_bytes, bytes) else str(guid_bytes).upper()
         value_to_id_cache[gpo_dn_upper] = gpo_guid
 
-        # ACEs sur le GPO
+        # ACEs on GPO
         aces_gpo, is_acl_protected_gpo = _parse_aces(
             obj.get("nTSecurityDescriptor"),
             id_to_type_cache,
@@ -92,7 +93,7 @@ def format_gpos(
             "GPO", object_type_guid_map=objecttype_guid_map
         )
         # Prefix SIDs
-      #  print("[DEBUG] Nombre d'ACEs générées pour ce GPO:", len(aces_gpo))
+
         for ace in aces_gpo:
             ace["PrincipalSID"] = prefix_well_known_sid(ace["PrincipalSID"], domain, main_domain_sid)
         # Filtrer comme BloodHound.py
@@ -116,6 +117,17 @@ def format_gpos(
 
         description = obj.get("description", None)
         
+        gplink = obj.get("gPLink", "")
+        gpo_links = []
+        if gplink:
+            for dn, option in ADUtils.parse_gplink_string(gplink):
+                # option == 2 => enforced ; == 0 => non-enforced
+                gpo_links.append({
+                    "dn": dn,
+                    "option": option,
+                    "is_enforced": option == 2
+                })        
+                
      #   print("[DEBUG GPO LOOP] domain (avant upper) =", repr(domain))
       #  print("[DEBUG GPO LOOP] domain_upper =", repr(domain.upper()))
         props = {
