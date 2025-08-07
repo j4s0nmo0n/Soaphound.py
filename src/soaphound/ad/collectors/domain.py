@@ -94,23 +94,16 @@ def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value
         domain_guid_str = str(UUID(bytes_le=guid_bytes)) if isinstance(guid_bytes, bytes) else guid_bytes
 
         # GPO Link
-        raw_gplinks = obj.get("gPLink", [])
-        gplink_values = raw_gplinks if isinstance(raw_gplinks, list) else ([raw_gplinks] if raw_gplinks else [])
+        raw_gplink = obj.get("gPLink", "")
         main_domain_gplinks = []
-        for gplink_str in gplink_values:
-            if not gplink_str or not isinstance(gplink_str, str):
-                continue
-            try:
-                link_part, options_part = gplink_str.split(';', 1)
-                if not link_part.lower().startswith("[ldap://"):
-                    continue
-                link_dn = link_part[len("[ldap://"):].strip("]")
-                link_options = int(options_part.strip('[]'))
-                gpo_id = value_to_id_cache.get(link_dn.upper())
+        if raw_gplink and isinstance(raw_gplink, str):
+            for dn, option in ADUtils.parse_gplink_string(raw_gplink):
+                gpo_id = value_to_id_cache.get(dn.upper())
                 if gpo_id:
-                    main_domain_gplinks.append({"IsEnforced": bool(link_options & 0x1), "GUID": gpo_id.upper()})
-            except Exception as e:
-                logging.warning(f"Could not parse gPLink '{gplink_str}' for domain: {e}")
+                    main_domain_gplinks.append({
+                        "IsEnforced": bool(option & 0x1),
+                        "GUID": gpo_id.upper()
+                    })
 
         # Retrieve the domain's ACEs (all of them, no filtering)
         aces_domain, is_acl_protected_domain = _parse_aces(
@@ -134,7 +127,7 @@ def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value
             "name": f"{domain_name.upper()}",
             "domain": f"{domain_name.upper()}",
             "domainsid": domain_sid_str,
-            "distinguishedname": dn.upper(),
+            "distinguishedname": obj.get("distinguishedName", "").upper(),
             "description": obj.get("description", ""),
             "functionallevel": functional_level,
             "highvalue": True,
