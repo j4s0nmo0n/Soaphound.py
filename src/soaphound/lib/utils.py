@@ -169,6 +169,39 @@ class ADUtils(object):
         return result
 
     @staticmethod
+    def find_main_domain_sid(all_collected_items, main_domain_root_dn):
+        # Dynamically finds the SID of the main domain from the collected AD objects.
+        main_dn_norm = main_domain_root_dn.lower()
+        for obj in all_collected_items:
+            dn = obj.get("distinguishedName", "")
+            obj_class = obj.get("objectClass", [])
+            if isinstance(obj_class, str):
+                obj_class = [obj_class]
+            if (
+                dn and dn.lower() == main_dn_norm
+                and ("domainDNS" in obj_class or "domain" in obj_class)
+                and "objectSid" in obj
+            ):
+                sid_bytes = obj["objectSid"]
+                if isinstance(sid_bytes, bytes):
+                    return LDAP_SID(sid_bytes).formatCanonical()
+                elif isinstance(sid_bytes, str) and sid_bytes.upper().startswith("S-1-"):
+                    return sid_bytes.upper()
+        # Fallback: first object of type domainDNS with a SID
+        for obj in all_collected_items:
+            obj_class = obj.get("objectClass", [])
+            if isinstance(obj_class, str):
+                obj_class = [obj_class]
+            if ("domainDNS" in obj_class or "domain" in obj_class) and "objectSid" in obj:
+                sid_bytes = obj["objectSid"]
+                if isinstance(sid_bytes, bytes):
+                    return LDAP_SID(sid_bytes).formatCanonical()
+                elif isinstance(sid_bytes, str) and sid_bytes.upper().startswith("S-1-"):
+                    return sid_bytes.upper()
+        raise RuntimeError("Unable to automatically find the main domain SID.")
+
+
+    @staticmethod
     def rpc_get_hostname(ip, adauth):
         '''
         Authenticated hostname resolution. Requires admin rights.
