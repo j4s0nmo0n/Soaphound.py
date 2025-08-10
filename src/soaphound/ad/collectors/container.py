@@ -1,5 +1,6 @@
 from uuid import UUID
 from impacket.ldap.ldaptypes import LDAP_SID
+from soaphound.lib.utils import ADUtils
 from soaphound.ad.cache_gen import filetime_to_unix, _parse_aces, pull_all_ad_objects, BH_TYPE_LABEL_MAP, dedupe_aces, adws_objecttype_guid_map
 import re
 import unicodedata
@@ -216,15 +217,7 @@ def format_containers(
     import unicodedata
     from impacket.ldap.ldaptypes import LDAP_SID
 
-    # Récupère le SID du domaine principal comme dans domain.py
-    main_domain_sid = ""
-    if isinstance(main_domain_root_dn, dict):
-        sid_bytes = main_domain_root_dn.get("objectSid")
-        if isinstance(sid_bytes, bytes):
-            main_domain_sid = LDAP_SID(sid_bytes).formatCanonical()
-        elif isinstance(sid_bytes, str) and sid_bytes.upper().startswith("S-1-"):
-            main_domain_sid = sid_bytes.upper()
-
+    main_domain_sid = ADUtils.find_main_domain_sid(all_collected_items, main_domain_root_dn)
     def filter_bloodhound_container_aces(aces):
         excluded_rights = {
             "addkeycredentiallink", "allextendedrights", "genericwrite"
