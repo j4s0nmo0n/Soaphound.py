@@ -77,8 +77,6 @@ def collect_computers(
     # Systematic addition of all LAPS v1 and v2 attributes
     laps_attributes = [
         "ms-Mcs-AdmPwd", "ms-Mcs-AdmPwdExpirationTime",
-        "msLAPS-Password", "msLAPS-EncryptedPasswordHistory",
-        "msLAPS-EncryptedDSRMPassword", "msLAPS-EncryptedDSRMPasswordHistory"
     ]
     lapsv2_attributes = [
         "msLAPS-EncryptedPassword", "msLAPS-PasswordExpirationTime",
