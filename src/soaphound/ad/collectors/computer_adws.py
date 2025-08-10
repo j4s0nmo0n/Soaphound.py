@@ -47,9 +47,6 @@ def collect_computers_adws(
     ]
     laps_attributes = [
         "ms-Mcs-AdmPwd", "ms-Mcs-AdmPwdExpirationTime",
-        "msLAPS-EncryptedPassword", "msLAPS-PasswordExpirationTime",
-        "msLAPS-Password", "msLAPS-EncryptedPasswordHistory",
-        "msLAPS-EncryptedDSRMPassword", "msLAPS-EncryptedDSRMPasswordHistory"
     ]
 
     lapsv2_attributes = [
