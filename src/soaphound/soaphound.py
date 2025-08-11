@@ -5,7 +5,7 @@ from soaphound.ad.adws import ADWSConnect, NTLMAuth
 from soaphound.ad.cache_gen import (
     pull_all_ad_objects, adws_objecttype_guid_map, generate_caches,
     _generate_individual_caches, adws_object_classes, create_and_combine_soaphound_cache,
-    SOAPHOUND_LDAP_PROPERTIES
+    SOAPHOUND_LDAP_PROPERTIES, SOAPHOUND_CACHE_PROPERTIES
 )
 from soaphound.ad.acls import normalize_name
 
@@ -139,7 +139,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     # 4. Collecte principale (utilise default_dn pour le base_dn)
     data_container_main = pull_all_ad_objects(
         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
-        query=main_query, attributes=SOAPHOUND_LDAP_PROPERTIES, base_dn_override=default_dn
+        query=main_query, attributes=SOAPHOUND_CACHE_PROPERTIES, base_dn_override=default_dn
     )
     all_collected_items = data_container_main.get("objects", [])
 
@@ -168,7 +168,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         elif oc is None:
             obj['objectClass'] = []
 
-    # Génère le cache pour SOAPHound
+    # We Generate Soaphound Cache data
     create_and_combine_soaphound_cache(objs, default_dn, output_dir=options.output_dir)
     id_to_type_cache, value_to_id_cache = _generate_individual_caches(objs, default_dn)
 
