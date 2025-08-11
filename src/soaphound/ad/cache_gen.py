@@ -24,6 +24,9 @@ SOAPHOUND_LDAP_PROPERTIES = sorted(list(set([
     "instanceType", "whenChanged", "uSNChanged", "mail",
 ])))
 
+SOAPHOUND_CACHE_PROPERTIES = ["distinguishedName", "objectSid", "ObjectGuid", "ObjectClass"]
+
+
 SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT = {
     "user": 0, "computer": 1, "group": 2, "grouppolicycontainer": 3,
     "domaindns": 4, "domain": 4, "organizationalunit": 5,
