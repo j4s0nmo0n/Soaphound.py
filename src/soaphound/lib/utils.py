@@ -179,8 +179,8 @@ class ADUtils(object):
                 obj_class = [obj_class]
             if (
                 dn and dn.lower() == main_dn_norm
-                and ("domainDNS" in obj_class or "domain" in obj_class)
-                and "objectSid" in obj
+                and ("objectSid" in obj)
+                and (("domainDNS" in obj_class or "domain" in obj_class) or not obj_class)
             ):
                 sid_bytes = obj["objectSid"]
                 if isinstance(sid_bytes, bytes):
