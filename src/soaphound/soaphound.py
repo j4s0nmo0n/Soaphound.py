@@ -70,7 +70,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 8""88888P'  `Y8bod8P' `Y888""8o  888bod8P' o888o o888o `Y8bod8P'  `V88V"V8P' o888o o888o `Y8bod88P" Y8P  888bod8P'     .8'     
                                  888                                                                     888       .o..P'      
                                 o888o                                                                   o888o      `Y8P'       
-                                                                                                    (made by BeletteTimoree)
+                                                                                                    (made by @belettet1m0ree)
 """
     log_format = '%(asctime)s %(levelname)s: %(name)s: %(message)s' if options.ts else '[%(levelname)s] %(message)s'
 
