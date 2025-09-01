@@ -222,7 +222,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 
     # Collect and format Users
     object_classes = adws_object_classes(adws_enum)
-    users = collect_users(options.domain_controller, options.domain, options.username, auth, adws_object_classes=object_classes)
+    users = collect_users(options.domain_controller, options.domain, options.username, auth, adws_object_classes=object_classes,adws_objecttype_guid_map=objecttype_guid_map)
     users_bh = format_users(users, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
 
     # Collect and format Computers
