@@ -5,89 +5,98 @@ from soaphound.ad.cache_gen import pull_all_ad_objects, _parse_aces, dedupe_aces
 from soaphound.ad.adws import WELL_KNOWN_SIDS
 from soaphound.lib.utils import ADUtils
 
-def collect_users(ip=None, domain=None, username=None, auth=None, base_dn_override=None, adws_object_classes=None):
-    """
-    Collecte tous les objets utilisateurs (classiques, GMSA et SMSA selon support)
-    """
-    attributes = [
-        "name", "objectGUID", "objectSid", "objectClass", "distinguishedName", "userAccountControl",
-        "whenCreated", "description", "memberOf", "primaryGroupID", "sAMAccountName", "displayName", "mail",
-        "title", "adminCount", "lastLogon", "lastLogonTimestamp", "pwdLastSet", "msDS-AllowedToDelegateTo",
-        "servicePrincipalName", "sIDHistory", "whenChanged", "nTSecurityDescriptor"
-    ]
-    
-    users = []
 
-    # Classic users
-    query_users = "(&(objectCategory=person)(objectClass=user))"
-    users += pull_all_ad_objects(
+
+def collect_users(
+    ip=None,
+    domain=None,
+    username=None,
+    auth=None,
+    base_dn_override=None,
+    adws_object_classes=None,
+    adws_objecttype_guid_map=None,
+    include_properties=True,
+    acl=True
+):
+    """
+    Collect all user objects (regular, GMSA, SMSA) in a granular way, like BloodHound.py.
+    `adws_object_classes` must be the list of objectClass from the schema.
+    `adws_objecttype_guid_map` must be the mapping of attributes in the schema (lDAPDisplayName: GUID).
+    """
+    # BH base properties
+    properties = [
+        "sAMAccountName", "distinguishedName", "sAMAccountType",
+        "objectSid", "primaryGroupID", "isDeleted", "objectClass"
+    ]
+    # msDS-GroupMSAMembership if attribute is present (mapping of attributes, not classes)
+    if adws_objecttype_guid_map and "msds-groupmsamembership".lower() in adws_objecttype_guid_map:
+        properties.append("msDS-GroupMSAMembership")
+    # Additional properties if requested
+    if include_properties:
+        properties += [
+            "servicePrincipalName", "userAccountControl", "displayName",
+            "lastLogon", "lastLogonTimestamp", "pwdLastSet", "mail", "title", "homeDirectory",
+            "description", "userPassword", "adminCount", "msDS-AllowedToDelegateTo", "sIDHistory",
+            "whencreated", "unicodepwd", "scriptpath"
+        ]
+        if adws_objecttype_guid_map and "unixuserpassword" in adws_objecttype_guid_map:
+            properties.append("unixuserpassword")
+    if acl:
+        properties.append("nTSecurityDescriptor")
+
+    # Build objectClass filters exactly like BH
+    # GMSA
+    if adws_object_classes and "msDS-GroupManagedServiceAccount" in adws_object_classes:
+        gmsa_filter = "(objectClass=msDS-GroupManagedServiceAccount)"
+    else:
+        logging.debug("No support for GMSA, skipping in query")
+        gmsa_filter = ""
+    # SMSA
+    if adws_object_classes and "msDS-ManagedServiceAccount" in adws_object_classes:
+        smsa_filter = "(objectClass=msDS-ManagedServiceAccount)"
+    else:
+        logging.debug("No support for SMSA, skipping in query")
+        smsa_filter = ""
+
+    # Combine all user object types in a single query (exactly like BloodHound.py)
+    if gmsa_filter or smsa_filter:
+        query = f"(|(&(objectCategory=person)(objectClass=user)){gmsa_filter}{smsa_filter})"
+    else:
+        query = "(&(objectCategory=person)(objectClass=user))"
+
+    # Retrieve the objects
+    users = pull_all_ad_objects(
         ip=ip,
         domain=domain,
         username=username,
         auth=auth,
-        query=query_users,
-        attributes=attributes,
+        query=query,
+        attributes=properties,
         base_dn_override=base_dn_override
     ).get("objects", [])
 
-    #print("object_class" + str(adws_object_classes))
-    # GMSA if supported and present in LDAP schema
-    if adws_object_classes and "msDS-GroupManagedServiceAccount" in adws_object_classes:
-        query_gmsa = "(objectClass=msDS-GroupManagedServiceAccount)"
-        users += pull_all_ad_objects(
-            ip=ip,
-            domain=domain,
-            username=username,
-            auth=auth,
-            query=query_gmsa,
-            attributes=attributes + ["msDS-GroupMSAMembership"],
-            base_dn_override=base_dn_override
-        ).get("objects", [])
-    else:
-        logging.debug("No support for GMSA, skipping GMSA query")
-        
-    # SMSA if supported and present in schema
-    if adws_object_classes and "msDS-ManagedServiceAccount" in adws_object_classes:
-        query_smsa = "(objectClass=msDS-ManagedServiceAccount)"
-        users += pull_all_ad_objects(
-            ip=ip,
-            domain=domain,
-            username=username,
-            auth=auth,
-            query=query_smsa,
-            attributes=attributes,
-            base_dn_override=base_dn_override
-        ).get("objects", [])
-    else:
-        logging.debug("No support for SMSA, skipping SMSA query")
-    
-     # Normalization as in BloodHound.py
-
+    # Normalization as in BloodHound.py
     for obj in users:
-
-        # Check if objectClass is a string, convert it to a list
+        # objectClass always a list
         oc = ADUtils.get_entry_property(obj, "objectClass", default=[])
         if isinstance(oc, str):
             obj["objectClass"] = [oc]
         elif oc is None:
             obj["objectClass"] = []
-        # DN as a simple string
+        # DN always a string
         dn = ADUtils.get_entry_property(obj, "distinguishedName", default="")
         if isinstance(dn, list):
             obj["distinguishedName"] = dn[0] if dn else ""
-        # ID as upper-case GUID if objectGUID is present and of type bytes
-
+        # GUID as string
         guid = ADUtils.get_entry_property(obj, "objectGUID")
         if isinstance(guid, bytes):
             try:
-                from uuid import UUID
                 obj["objectGUID"] = str(UUID(bytes_le=guid)).upper()
             except Exception:
                 pass
+
     print(f"[INFO] Users collected : {len(users)}")
     return users
-
-
 
 
 def prefix_well_known_sid(sid: str, domain_name: str, domain_sid: str, well_known_sids=WELL_KNOWN_SIDS):
