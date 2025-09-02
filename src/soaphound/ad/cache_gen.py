@@ -158,21 +158,6 @@ def adws_objecttype_guid_map(adws, schema_dn) -> dict:
                     mapping[ldn.text.lower()] = guid_str
                 except Exception:
                     pass
-
-    # -- attributeSchema --
-    et_attrs = adws.pull(query, attributes, use_schema=True, base_object_dn_for_soap=schema_dn)
-    if et_attrs is not None:
-        for item in et_attrs.findall(".//ns1:attributeSchema", NAMESPACES):
-            ldn = item.find(".//ns1:lDAPDisplayName/ns2:value", NAMESPACES)
-            guid = item.find(".//ns1:schemaIDGUID/ns2:value", NAMESPACES)
-            if ldn is not None and ldn.text and guid is not None and guid.text:
-                try:
-                    guid_bytes = base64.b64decode(guid.text)
-                    guid_str = str(UUID(bytes_le=guid_bytes)).lower()
-                    mapping[ldn.text.lower()] = guid_str
-                except Exception:
-                    pass
-
     return mapping
 
 def _generate_individual_caches(all_pulled_items, domain_root_dn):
