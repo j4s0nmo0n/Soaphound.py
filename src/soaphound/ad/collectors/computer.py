@@ -130,14 +130,6 @@ def collect_computers(
             except Exception:
                 pass
 
-    # Simple debug: computer names + detected LAPS attributes
-  #  print("[DEBUG] Machines collectées :", [obj.get("name") for obj in raw_objects if "objectClass" in obj and "computer" in obj["objectClass"]])
-#    for obj in raw_objects:
-#        if "objectClass" in obj and "computer" in obj["objectClass"]:
- #           laps_attrs = [k for k in laps_attributes if obj.get(k)]
- #           if laps_attrs:
- #               print(f"[DEBUG][LAPS] {obj.get('name')} => LAPS attribute found! : {laps_attrs}")
-
     print(f"[INFO] Computers collected : {len(raw_objects)}")
     return raw_objects
 
