@@ -230,8 +230,8 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         computers = collect_computers_adws(
             options.domain_controller, options.domain, options.username, auth,
             base_dn_override=default_dn, adws_object_classes=object_classes,
-            has_laps=has_laps, has_lapsv2=has_laps2
-        )
+            has_laps=has_laps, has_lapsv2=has_laps2,bjecttype_guid_map=objecttype_guid_map)
+        
         computers_bh = format_computers_adws(computers, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
     else:
         smb_auth = ADAuthentication(username=options.username, password=options.password, domain=options.domain, lm_hash=lm, nt_hash=nt, aeskey='', kdc=options.domain_controller)
@@ -260,7 +260,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         computers = collect_computers(
             options.domain_controller, options.domain, options.username, auth,
             base_dn_override=default_dn, adws_object_classes=object_classes,
-            has_laps=has_laps, has_lapsv2=has_laps2
+            has_laps=has_laps, has_lapsv2=has_laps2, objecttype_guid_map=objecttype_guid_map
         )
         computers_bh = format_computers(
             computers, options.domain, domain_sid, adws_enum,
