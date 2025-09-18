@@ -15,7 +15,7 @@ import os
 import sys
 
 from soaphound.lib.authentication import ADAuthentication
-
+from soaphound.ad.acls import normalize_name
 
 
 def get_output_dir_from_argv():
@@ -37,16 +37,17 @@ def collect_computers(
     base_dn_override=None,
     cache_file=None,
     adws_object_classes=None,has_laps=False,
-    has_lapsv2=False
+    has_lapsv2=False,
+    objecttype_guid_map=None
 ):
     """
-    Collecte tous les ordinateurs AD via ADWS (jamais LDAP direct), avec tous les attributs LAPS v1/v2.
+        Collect all AD computers with ACLs, LAPS, without sessions or RPC.
     """
     import json
     from uuid import UUID
     from soaphound.lib.utils import ADUtils
 
-    # Si on collecte depuis un fichier déjà prêt
+    # In case we have a cache file ready
     if cache_file:
         with open(cache_file, "r", encoding="utf-8") as f:
             cache_data = json.load(f)
@@ -70,33 +71,31 @@ def collect_computers(
     attributes = [
         "name", "objectGUID", "objectSid", "objectClass", "distinguishedName",
         "nTSecurityDescriptor", "whenCreated", "description", "sAMAccountName", "dNSHostName", "userAccountControl",
-        "operatingSystem", "operatingSystemVersion", "servicePrincipalName",
-        "msDS-AllowedToActOnBehalfOfOtherIdentity", "msDS-AllowedToDelegateTo",
+        "operatingSystem", "operatingSystemVersion", "servicePrincipalName", "msDS-AllowedToDelegateTo",
         "lastLogon", "lastLogonTimestamp", "adminCount", "primaryGroupID"
     ]
-    # Systematic addition of all LAPS v1 and v2 attributes
-    laps_attributes = [
-        "ms-Mcs-AdmPwd", "ms-Mcs-AdmPwdExpirationTime",
-    ]
-    lapsv2_attributes = [
-        "msLAPS-EncryptedPassword", "msLAPS-PasswordExpirationTime",
-    ]
+    
+    objecttype_guid_map_normalized = {k.lower(): v for k, v in (objecttype_guid_map or {}).items()}
 
-    if has_laps or has_lapsv2:
-        for laps_attr in laps_attributes:
-            if laps_attr not in attributes:
-                attributes.append(laps_attr)
+    # Add msDS-AllowedToActOnBehalfOfOtherIdentity if available in schema
+    if "ms-ds-allowed-to-act-on-behalf-of-other-identity".lower() in objecttype_guid_map_normalized:
+        attributes.append("msDS-AllowedToActOnBehalfOfOtherIdentity")
+    # Add LAPS v1 attributes if available
+    if has_laps:
+        if "ms-mcs-admpwdexpirationtime".lower() in objecttype_guid_map_normalized:
+            attributes.append("ms-Mcs-AdmPwdExpirationTime")
+        if "ms-mcs-admpwd".lower() in objecttype_guid_map_normalized:
+            attributes.append("ms-Mcs-AdmPwd")
+    # Add LAPS v2 attributes if available
     if has_lapsv2:
-        for laps_attr in lapsv2_attributes:
-            if laps_attr not in attributes:
-                attributes.append(laps_attr)
+        if "mslaps-passwordexpirationtime".lower() in objecttype_guid_map_normalized:
+            attributes.append("msLAPS-PasswordExpirationTime")
+        if "mslaps-encryptedpassword".lower() in objecttype_guid_map_normalized:
+            attributes.append("msLAPS-EncryptedPassword")
 
-
-    #print(f"[DEBUG] attributes asked from computer collect :\n{attributes}")
-
-    # Optional: exclude gMSA/MSA 
-    gmsa_filter = '(!(objectClass=msDS-GroupManagedServiceAccount))' if 'msDS-GroupManagedServiceAccount' in (adws_object_classes or []) else ''
-    smsa_filter = '(!(objectClass=msDS-ManagedServiceAccount))' if 'msDS-ManagedServiceAccount' in (adws_object_classes or []) else ''
+    # Exclude GMSA/SMSA objects if present in schema
+    gmsa_filter = '(!(objectClass=msDS-GroupManagedServiceAccount))' if adws_object_classes and 'msDS-GroupManagedServiceAccount' in adws_object_classes else ''
+    smsa_filter = '(!(objectClass=msDS-ManagedServiceAccount))' if adws_object_classes and 'msDS-ManagedServiceAccount' in adws_object_classes else ''
     query = f"(&(sAMAccountType=805306369){gmsa_filter}{smsa_filter})"
 
     # --- Pull via ADWS ---
@@ -424,7 +423,7 @@ def format_computers(
             "allowedtodelegate": delegatehosts_raw
         }
 
-        # --- Exporte tous les attributs LAPS connus s'ils existent ---
+        # --- Export tous les attributs LAPS connus s'ils existent ---
         laps_attrs_to_export = [
             "ms-Mcs-AdmPwd", "ms-Mcs-AdmPwdExpirationTime",
             "msLAPS-EncryptedPassword", "msLAPS-PasswordExpirationTime",
