@@ -29,7 +29,7 @@ output_dir = get_output_dir_from_argv()
 cache_file_path = os.path.join(output_dir, "Cache.json")
 
 
-def collect_computers(
+def collect_computers_adws(
     ip=None,
     domain=None,
     username=None,
