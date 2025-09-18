@@ -149,7 +149,7 @@ import queue
 
 
 
-def format_computers(
+def format_computers_adws(
     computers,
     domain,
     domain_sid,
