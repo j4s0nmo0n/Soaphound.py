@@ -134,9 +134,18 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     has_laps = laps_guid is not None
     has_laps2 = laps2_guid is not None
 
-    main_query = "(|(objectCategory=person)(objectClass=msDS-GroupManagedServiceAccount)(objectClass=msDS-ManagedServiceAccount)(objectCategory=computer)(objectCategory=group)(objectClass=organizationalUnit)(objectClass=domain)(objectClass=container)(objectClass=groupPolicyContainer))"
+    # 4. We collect all child objects before main collect which contains all objects
+    child_objects_query = "(|(objectClass=container)(objectClass=organizationalUnit)(sAMAccountType=805306369)(objectClass=group)(&(objectCategory=person)(objectClass=user)))"
+    attributes_child = [ "objectSid", "objectClass", "objectGUID", "distinguishedName", "sAMAccountName", "sAMAccountType"]
+    
+    data_child_main = pull_all_ad_objects(
+        ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
+        query=main_query, attributes=attributes_child, base_dn_override=default_dn
+    )
+    all_child_items = data_child_main.get("objects", [])
 
-    # 4. Collecte principale (utilise default_dn pour le base_dn)
+    # 5. Main collect
+    main_query = "(|(objectCategory=person)(objectClass=msDS-GroupManagedServiceAccount)(objectClass=msDS-ManagedServiceAccount)(objectCategory=computer)(objectCategory=group)(objectClass=organizationalUnit)(objectClass=domain)(objectClass=container)(objectClass=groupPolicyContainer))"
     data_container_main = pull_all_ad_objects(
         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
         query=main_query, attributes=SOAPHOUND_CACHE_PROPERTIES, base_dn_override=default_dn
