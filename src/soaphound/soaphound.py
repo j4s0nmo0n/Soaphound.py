@@ -134,18 +134,18 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     has_laps = laps_guid is not None
     has_laps2 = laps2_guid is not None
 
-    # 4. We collect all child objects before main collect which contains all objects
+    main_query = "(|(objectCategory=person)(objectClass=msDS-GroupManagedServiceAccount)(objectClass=msDS-ManagedServiceAccount)(objectCategory=computer)(objectCategory=group)(objectClass=organizationalUnit)(objectClass=domain)(objectClass=container)(objectClass=groupPolicyContainer))"
+
     child_objects_query = "(|(objectClass=container)(objectClass=organizationalUnit)(sAMAccountType=805306369)(objectClass=group)(&(objectCategory=person)(objectClass=user)))"
     attributes_child = [ "objectSid", "objectClass", "objectGUID", "distinguishedName", "sAMAccountName", "sAMAccountType"]
     
     data_child_main = pull_all_ad_objects(
         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
-        query=child_objects_query, attributes=attributes_child, base_dn_override=default_dn
+        query=main_query, attributes=attributes_child, base_dn_override=default_dn
     )
     all_child_items = data_child_main.get("objects", [])
-
-    # 5. Main collect
-    main_query = "(|(objectCategory=person)(objectClass=msDS-GroupManagedServiceAccount)(objectClass=msDS-ManagedServiceAccount)(objectCategory=computer)(objectCategory=group)(objectClass=organizationalUnit)(objectClass=domain)(objectClass=container)(objectClass=groupPolicyContainer))"
+    
+    # 4. Collecte principale (utilise default_dn pour le base_dn)
     data_container_main = pull_all_ad_objects(
         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
         query=main_query, attributes=SOAPHOUND_CACHE_PROPERTIES, base_dn_override=default_dn
@@ -214,7 +214,13 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     
     print("Number of trusts collected:", len(trusts))
     # --- (4) Format domains, inject trusts ---
-    domains_bh = format_domains(raw_domains, options.domain, default_dn, id_to_type_cache, value_to_id_cache, objs, objecttype_guid_map, trusts, domain_functionality=domainFunctionality)
+    domains_bh = format_domains(
+    raw_domains, options.domain, default_dn,
+    id_to_type_cache, value_to_id_cache,
+    all_child_items,   
+    objecttype_guid_map, trusts,
+    domain_functionality=domainFunctionality
+)
 
 
     # Collect and format GPOs
@@ -239,7 +245,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         computers = collect_computers_adws(
             options.domain_controller, options.domain, options.username, auth,
             base_dn_override=default_dn, adws_object_classes=object_classes,
-            has_laps=has_laps, has_lapsv2=has_laps2,objecttype_guid_map=objecttype_guid_map)
+            has_laps=has_laps, has_lapsv2=has_laps2)
         
         computers_bh = format_computers_adws(computers, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map=objecttype_guid_map)
     else:
