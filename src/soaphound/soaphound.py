@@ -140,7 +140,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     
     data_child_main = pull_all_ad_objects(
         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
-        query=main_query, attributes=attributes_child, base_dn_override=default_dn
+        query=child_objects_query, attributes=attributes_child, base_dn_override=default_dn
     )
     all_child_items = data_child_main.get("objects", [])
 
