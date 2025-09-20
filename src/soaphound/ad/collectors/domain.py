@@ -5,7 +5,6 @@ from impacket.ldap.ldaptypes import LDAP_SID
 from soaphound.lib.utils import ADUtils
 from soaphound.ad.cache_gen import pull_all_ad_objects, filetime_to_unix, _parse_aces, dedupe_aces,adws_objecttype_guid_map
 from soaphound.ad.adws import WELL_KNOWN_SIDS
-from .container import get_child_objects, BH_TYPE_LABEL_MAP
 from .trust import trust_to_bh_output
 
 def collect_domains(ip, domain, username, auth, base_dn_override=None, domain_functionality=None):
@@ -27,7 +26,6 @@ def collect_domains(ip, domain, username, auth, base_dn_override=None, domain_fu
     ).get("objects", [])
     print(f"[INFO] Domains collected : {len(domains)}")
     return domains
-
 
 
 def sid_to_principal_type(sid):
@@ -60,29 +58,60 @@ def prefix_well_known_sid(sid: str, domain_name: str, domain_sid: str, well_know
         return f"{domain_name.upper()}-{sid}"
     return sid
 
-def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value_to_id_cache, all_collected_items, objecttype_guid_map, all_trusts, domain_functionality=None):
-    # Construction of the lookup from parent DN to direct children (containers, OUs, etc.)
-    childobjects_lookup = {}
-    for obj in all_collected_items:
+def get_child_objects_adws(parent_dn, data_child_main):
+    """
+    Retourne tous les enfants directs d'un objet AD (domaine/container/OU) selon la DN, pour ADWS.
+    Privilégie l'ObjectSID quand il existe, sinon fallback sur l'ObjectGUID.
+    """
+    parent_dn_upper = parent_dn.upper()
+    children = []
+    for obj in data_child_main:
         dn_child = obj.get("distinguishedName")
+        sid_child = obj.get("objectSid")
         guid_child = obj.get("objectGUID")
         obj_classes = obj.get("objectClass", [])
-        obj_type = obj_classes[0] if isinstance(obj_classes, list) and obj_classes else obj_classes or "Unknown"
-        parent_dn = None
-        if dn_child and ',' in dn_child:
-            parent_dn = dn_child.split(",", 1)[1]
-        if parent_dn:
-            childobjects_lookup.setdefault(parent_dn.upper(), []).append({
-                "ObjectIdentifier": str(UUID(bytes_le=guid_child)) if isinstance(guid_child, bytes) else guid_child,
-                "ObjectType": obj_type.title() if obj_type else "Unknown",
-            })
+        if not dn_child:
+            continue
+        dn_child_upper = dn_child.upper()
 
+        # Vérifie si c'est un enfant direct (niveau hiérarchique +1)
+        if dn_child_upper.endswith("," + parent_dn_upper) and \
+           dn_child_upper.count(",") == parent_dn_upper.count(",") + 1:
+
+            # Détection du type
+            obj_type = obj_classes[0] if isinstance(obj_classes, list) and obj_classes else obj_classes or "Unknown"
+            if obj_type.lower() == "top" and isinstance(obj_classes, list) and len(obj_classes) > 1:
+                obj_type = obj_classes[1]
+
+            # Privilégier le SID si dispo
+            object_id = None
+            if isinstance(sid_child, bytes):
+                object_id = LDAP_SID(sid_child).formatCanonical()
+            elif isinstance(sid_child, str) and sid_child.upper().startswith("S-1-"):
+                object_id = sid_child.upper()
+
+            # Sinon fallback GUID
+            if not object_id and guid_child:
+                object_id = str(UUID(bytes_le=guid_child)) if isinstance(guid_child, bytes) else guid_child
+
+            if object_id:
+                children.append({
+                    "ObjectIdentifier": object_id,
+                    "ObjectType": obj_type.title() if obj_type else "Unknown",
+                })
+
+    return children
+
+
+
+def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value_to_id_cache, data_child_main, objecttype_guid_map, all_trusts, domain_functionality=None):
     formatted_domains = []
     for obj in domains:
         dn = obj.get("distinguishedName", "")
-        child_objects = get_child_objects(
-            dn.upper(), value_to_id_cache, id_to_type_cache, BH_TYPE_LABEL_MAP
-        )
+       # print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>DN "+dn)
+        #print(str(all_collected_items))
+        child_objects = get_child_objects_adws(
+            dn, data_child_main)
 
         sid_bytes = obj.get("objectSid")
         guid_bytes = obj.get("objectGUID")
