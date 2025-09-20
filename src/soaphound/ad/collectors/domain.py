@@ -108,8 +108,6 @@ def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value
     formatted_domains = []
     for obj in domains:
         dn = obj.get("distinguishedName", "")
-       # print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>DN "+dn)
-        #print(str(all_collected_items))
         child_objects = get_child_objects_adws(
             dn, data_child_main)
 
