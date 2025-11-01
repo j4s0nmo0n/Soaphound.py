@@ -169,14 +169,39 @@ def format_containers(
         container_dn_upper = unicodedata.normalize('NFKC', dn).upper()
 
         guid_bytes = obj.get("objectGUID")
-        object_guid_str = str(UUID(bytes_le=guid_bytes)) if isinstance(guid_bytes, bytes) else guid_bytes
+        # Normalize the GUID: bytes -> canonical UUID string, otherwise string -> uppercase canonical
+        if isinstance(guid_bytes, bytes):
+            object_guid_str = str(UUID(bytes_le=guid_bytes)).upper()
+        else:
+            object_guid_str = str(guid_bytes).upper() if guid_bytes else None
 
         aces, is_acl_protected = _parse_aces(
             obj.get("nTSecurityDescriptor"),
             id_to_type_cache,
             object_guid_str,
-            "Container", object_type_guid_map=objecttype_guid_map
+            "Container",
+            object_type_guid_map=objecttype_guid_map
         )
+
+        # Normalize PrincipalSIDs:
+        def _normalize_principal_sid(sid):
+            if not sid:
+                return sid
+            s_val = str(sid)
+            # If already prefixed like "DOMAIN-S-1-..." keep as uppercase
+            if re.match(r'^[A-Z0-9\.\-_]+-S-1-', s_val, re.I):
+                return s_val.upper()
+            su = s_val.upper()
+            # If it's a well-known SID, prefix with domain (to match BloodHound output)
+            if su in ADUtils.WELLKNOWN_SIDS:
+                return f"{domain.upper()}-{su}"
+            # Otherwise return uppercase canonical SID
+            return su
+
+        for a in aces:
+            if "PrincipalSID" in a and a["PrincipalSID"]:
+                a["PrincipalSID"] = _normalize_principal_sid(a["PrincipalSID"])
+
         # Uncomment to filter ACEs like BloodHound
         # aces = filter_bloodhound_container_aces(aces)
         # aces = dedupe_aces(aces)
@@ -214,11 +239,25 @@ def format_containers(
             "IsACLProtected": is_acl_protected,
         }
         formatted_containers.append(container_bh_entry)
+
+    # Final deduplication: merge entries having the same canonical ObjectIdentifier (upper)
+    seen = set()
+    final_list = []
+    for c in formatted_containers:
+        oid = c.get("ObjectIdentifier")
+        key = oid.upper() if isinstance(oid, str) else None
+        if key:
+            if key in seen:
+                # simple merge possible here (if needed), but avoid adding duplicate entries
+                continue
+            seen.add(key)
+        final_list.append(c)
+
     return {
-        "data": formatted_containers,
+        "data": final_list,
         "meta": {
             "type": "containers",
-            "count": len(formatted_containers),
+            "count": len(final_list),
             "version": 6
         }
     }
