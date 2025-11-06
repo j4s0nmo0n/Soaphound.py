@@ -217,8 +217,28 @@ def _generate_individual_caches(all_pulled_items, domain_root_dn):
     return id_to_type_cache, value_to_id_cache
 
 def get_soaphound_type_id(dn, object_classes, object_sid_str, domain_root_dn):
-    if not isinstance(object_classes, list): object_classes = [object_classes]
+    if not isinstance(object_classes, list): object_classes = [object_classes] if object_classes else []
     object_classes_lower = [str(oc).lower() for oc in object_classes]
+
+    # Explicit handling for managed/service accounts ----
+    # gMSA / MSA objectClass examples: "msds-groupmanagedserviceaccount", "msds-managedserviceaccount"
+    # other service account indicator: "serviceaccount" or "msds-servicedomain" (varies by schema)
+    
+    msa_markers = (
+        'msds-groupmanagedserviceaccount',
+        'msds-managedserviceaccount',
+        'msds-delegatedmanagedserviceaccount', 
+        'managedserviceaccount',
+        'serviceaccount'
+    )
+
+    for m in msa_markers:
+        if any(m in oc for oc in object_classes_lower):
+            # Traiter les comptes managés comme "user" par défaut.
+            # Si tu veux les considérer comme "computer", retourne SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("computer")
+            return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("user", 0)
+
+    # existing special cases
     if "pkicertificatetemplate" in object_classes_lower: return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("pkicertificatetemplate")
     if "certificationauthority" in object_classes_lower: return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("certificationauthority")
     if "pkienrollmentservice" in object_classes_lower: return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("pkienrollmentservice")
