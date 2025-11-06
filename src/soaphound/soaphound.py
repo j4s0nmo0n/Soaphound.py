@@ -184,6 +184,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     logging.info(f"Start collecting ...")
 
     
+    
     # --- (1) Collect raw domains ---   
     raw_domains = collect_domains(options.domain_controller, options.domain, options.username, auth)
     
@@ -207,6 +208,11 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     "auth": auth
     }
 
+    # Collect and format GPOs
+    gpos = collect_gpos(options.domain_controller, options.domain, options.username, auth)
+    gpos_bh = format_gpos(gpos, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
+        
+
     # Collect and format Trusts
     trusts = collect_trusts(options.domain_controller, options.domain, options.username, auth, domain_sid=domain_sid)
     
@@ -223,10 +229,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 )
 
 
-    # Collect and format GPOs
-    gpos = collect_gpos(options.domain_controller, options.domain, options.username, auth)
-    gpos_bh = format_gpos(gpos, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
-        
+ 
     # Collect and format OUs
     ous = collect_ous(options.domain_controller, options.domain, options.username, auth)
     ous_bh = format_ous(ous, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
