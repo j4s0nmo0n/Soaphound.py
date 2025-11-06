@@ -217,7 +217,6 @@ def format_containers(
         domainsid = obj.get("domainsid") or obj.get("domainSid") or main_domain_sid or ""
 
         highvalue = obj.get("highvalue", False)
-        isaclprotected = obj.get("isaclprotected", False)
 
         props = {
             "domain": domain.upper(),
@@ -227,7 +226,7 @@ def format_containers(
             "highvalue": highvalue,
             "description": description,
             "whencreated": filetime_to_unix(obj.get("whenCreated")),
-            "isaclprotected": isaclprotected,
+            "isaclprotected": is_acl_protected,
         }
 
         container_bh_entry = {
