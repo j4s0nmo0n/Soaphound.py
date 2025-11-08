@@ -96,7 +96,7 @@ def get_child_objects_adws(parent_dn, data_child_main):
 
             if object_id:
                 children.append({
-                    "ObjectIdentifier": object_id,
+                    "ObjectIdentifier": object_id.upper(),
                     "ObjectType": obj_type.title() if obj_type else "Unknown",
                 })
 
