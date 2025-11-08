@@ -243,12 +243,13 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     users = collect_users(options.domain_controller, options.domain, options.username, auth, adws_object_classes=object_classes,adws_objecttype_guid_map=objecttype_guid_map)
     users_bh = format_users(users, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
 
+
     # Collect and format Computers
     if (options.collectionmethod == "ADWSOnly"):
         computers = collect_computers_adws(
             options.domain_controller, options.domain, options.username, auth,
             base_dn_override=default_dn, adws_object_classes=object_classes,
-            has_laps=has_laps, has_lapsv2=has_laps2)
+            has_laps=has_laps, has_lapsv2=has_laps2,objecttype_guid_map=objecttype_guid_map )
         
         computers_bh = format_computers_adws(computers, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map=objecttype_guid_map)
     else:
