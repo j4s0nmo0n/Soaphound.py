@@ -78,7 +78,7 @@ def collect_computers(
     objecttype_guid_map_normalized = {k.lower(): v for k, v in (objecttype_guid_map or {}).items()}
 
     # Add msDS-AllowedToActOnBehalfOfOtherIdentity if available in schema
-    if "ms-ds-allowed-to-act-on-behalf-of-other-identity".lower() in objecttype_guid_map_normalized:
+    if "msds-allowedtoactonbehalfofotheridentity".lower() in objecttype_guid_map_normalized:
         attributes.append("msDS-AllowedToActOnBehalfOfOtherIdentity")
     # Add LAPS v1 attributes if available
     if has_laps:
@@ -391,6 +391,34 @@ def format_computers(
         aces_computer = dedupe_aces(aces_computer)
         for ace in aces_computer:
             ace["PrincipalSID"] = prefix_well_known_sid(ace["PrincipalSID"], domain, domain_sid)
+
+        allowed_to_act_list = []
+        act_raw = obj.get("msDS-AllowedToActOnBehalfOfOtherIdentity")
+        if act_raw:
+            try:
+                act_aces, _ = _parse_aces(
+                    act_raw,
+                    id_to_type_cache,
+                    comp_sid,
+                    "Computer",
+                    object_type_guid_map=objecttype_guid_map
+                )
+                act_aces = dedupe_aces(act_aces)
+                for a in act_aces:
+                    a["PrincipalSID"] = prefix_well_known_sid(a["PrincipalSID"], domain, domain_sid)
+                    right = a.get("RightName", "")
+                    # Follow BloodHound behavior: ignore Owner; only include meaningful rights (GenericAll is a clear signal)
+                    if right == "Owner":
+                        continue
+                    if right == "GenericAll" or right == "WriteDacl" or right == "WriteOwner" or right == "AddKeyCredentialLink" or right == "ReadLAPSPassword":
+                        allowed_to_act_list.append({
+                            "ObjectIdentifier": a["PrincipalSID"],
+                            "ObjectType": a.get("PrincipalType", "User")
+                        })
+            except Exception as e:
+                logging.debug("Failed to parse msDS-AllowedToActOnBehalfOfOtherIdentity for %s: %s", hostname, e)
+
+        # If no explicit RBCD entries were found, left as empty list (matching BloodHound default)    
         
         #print(f"[DEBUG][UAC] {hostname}: userAccountControl={uac} (hex={uac:x}), unconstrained={(uac & 0x00080000) == 0x00080000}")
         
@@ -423,7 +451,7 @@ def format_computers(
             "allowedtodelegate": delegatehosts_raw
         }
 
-        # --- Export tous les attributs LAPS connus s'ils existent ---
+        #  LAPS attributes if present
         laps_attrs_to_export = [
             "ms-Mcs-AdmPwd", "ms-Mcs-AdmPwdExpirationTime",
             "msLAPS-EncryptedPassword", "msLAPS-PasswordExpirationTime",
@@ -449,7 +477,7 @@ def format_computers(
 
         computer_bh_entry = {
             "ObjectIdentifier": comp_sid,
-            "AllowedToAct": [],
+            "AllowedToAct": allowed_to_act_list,
             "PrimaryGroupSID": f"{domain_sid}-{obj.get('primaryGroupID', 515)}",
             "Properties": props,
             "Aces": aces_computer,
