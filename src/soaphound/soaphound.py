@@ -1,4 +1,4 @@
-import logging, sys, os, getpass, json, dns.resolver, datetime, time, zipfile
+import logging, sys, os, getpass, json, dns.resolver, datetime, time, zipfile, base64
 from soaphound.lib.cli import gen_cli_args
 from impacket.ldap.ldaptypes import LDAP_SID
 from soaphound.ad.adws import ADWSConnect, NTLMAuth
@@ -24,6 +24,7 @@ from soaphound.ad.collectors.computer_adws import collect_computers_adws, format
 from soaphound.lib.domain import ADDomain
 
 def export_bloodhound_json(data, output_path):
+    """Export data to BloodHound JSON file"""
     output_dir = os.path.dirname(output_path)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
@@ -31,6 +32,7 @@ def export_bloodhound_json(data, output_path):
         json.dump(clean_bytes(data), f, indent=2)
 
 def safe_export_bloodhound_json(data, output_path):
+    """Export only if data contains objects"""
     if "meta" in data and data["meta"].get("count", 0) > 0:
         export_bloodhound_json(data, output_path)
 
@@ -45,10 +47,10 @@ def clean_bytes(obj):
     else:
         return obj
 
-def zip_bloodhound_jsons(output_dir, timestamp,  archive_name="BloodHound.zip"):
+def zip_bloodhound_jsons(output_dir, timestamp, archive_name="BloodHound.zip"):
     """
-    Archive tous les fichiers .json du dossier output_dir en BloodHound.zip,
-    sauf cache.json (insensible à la casse).
+    Archive all .json files from output_dir to BloodHound.zip,
+    excluding cache files (case insensitive).
     """
     archive_path = archive_name
     with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -56,10 +58,43 @@ def zip_bloodhound_jsons(output_dir, timestamp,  archive_name="BloodHound.zip"):
             if fname.lower().endswith(".json") and fname.lower().startswith(timestamp):
                 fpath = os.path.join(output_dir, fname)
                 archive.write(fpath, arcname=fname)
-    print(f"Zip file created at : {archive_path}")
+    print(f"Zip file created at: {archive_path}")
+
+def ensure_output_dir(output_dir):
+    """
+    Ensure output directory is valid and exists.
+    
+    Args:
+        output_dir: Directory path (can be empty or None)
+        
+    Returns:
+        str: Valid directory path
+    """
+    # Default value if empty
+    if not output_dir or output_dir.strip() == '':
+        output_dir = 'output'
+        logging.info(f"Using default output directory: {output_dir}")
+    
+    # Clean the path
+    output_dir = output_dir.strip()
+    
+    # Create if doesn't exist
+    if not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            logging.debug(f"Created output directory: {output_dir}")
+        except OSError as e:
+            logging.error(f"Failed to create output directory '{output_dir}': {e}")
+            raise
+    
+    return output_dir
 
 def main():
     options = gen_cli_args()
+    
+    # Validate and create output directory early
+    options.output_dir = ensure_output_dir(options.output_dir)
+    
     banner = """
  .oooooo..o                                oooo                                                .o8                             
 d8P'    `Y8                                `888                                               "888                             
@@ -72,25 +107,43 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
                                 o888o                                                                   o888o      `Y8P'       
                                                                                                     (made by @belettet1m0ree)
 """
+    
+    # Configure logging based on verbosity level
     log_format = '%(asctime)s %(levelname)s: %(name)s: %(message)s' if options.ts else '[%(levelname)s] %(message)s'
 
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    
+    logger.handlers.clear()
+    # Determine log level
+    if options.v:
+        log_level = logging.DEBUG
+        # In debug mode, add file handler
+        log_file = f"soaphound_debug_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s [%(levelname)s] %(name)s:%(funcName)s:%(lineno)d - %(message)s'
+        ))
+        logger.addHandler(file_handler)
+        logging.info(f"Debug log will be written to: {log_file}")
+    else:
+        log_level = logging.INFO
+
+    logger.setLevel(log_level)
+    
+    # Console handler
     stream = logging.StreamHandler(sys.stderr)
-    stream.setLevel(logging.DEBUG)
+    stream.setLevel(log_level)
     formatter = logging.Formatter(log_format)
     stream.setFormatter(formatter)
     logger.addHandler(stream)
 
-    if options.v is True:
-        logger.setLevel(logging.DEBUG)
-
-    logging.debug(options)
-    print(options)
+    logging.debug(f"Options: {options}")
 
     lm = ''
     nt = ''
     
+    # Parse authentication options
     if options.username is not None and options.password is not None:
         logging.debug('Authentication: username/password')
         auth = NTLMAuth(password=options.password)
@@ -103,41 +156,58 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         lm, nt = options.hashes.split(":")
         auth = NTLMAuth(password=None, hashes=nt)
     else:
-        logging.debug('Failed to parse options')
-        parser.print_help()
+        logging.error('Failed to parse authentication options')
         sys.exit(1)
 
     print(banner)
 
-    # 1. RootDSE query (Resource)
+    # 1. RootDSE query (Resource endpoint)
+    logging.info("Connecting to ADWS Resource endpoint...")
     adws_resource = ADWSConnect(options.domain_controller, options.domain, options.username, auth, "Resource")
     contexts = adws_resource.get_rootdse_contexts(adws_resource._fqdn, adws_resource._nmf)
+    
     schema_dn = contexts["schemaNamingContext"]
-    default_dn = contexts["defaultNamingContext"]   # Use this DN for all pulls!
+    default_dn = contexts["defaultNamingContext"]  # Use this DN for all pulls!
     root_domain_dn = contexts["rootDomainNamingContext"]
     config_dn = contexts["configurationNamingContext"]
     naming_contexts = contexts["namingContexts"]
+    
+    # Save domainFunctionality and forestFunctionality values from RootDSE request
     vals = contexts["domainFunctionality"]
-    #Here we save domainFunctionality and ForestFunctionality value that we got from RootDSE request 
     domainFunctionality = int(vals[0]) if vals else None
     vals_forest = contexts["forestFunctionality"]
-    forestFunctionality = int(vals[0]) if vals_forest else None
+    forestFunctionality = int(vals_forest[0]) if vals_forest else None
+
+    logging.info(f"Connected to domain: {options.domain}")
+    logging.info(f"Default naming context: {default_dn}")
 
     # 2. One Enumeration connection for all pulls
+    logging.info("Connecting to ADWS Enumeration endpoint...")
     adws_enum = ADWSConnect(options.domain_controller, options.domain, options.username, auth, "Enumeration")
 
     # 3. ObjectType GUID Mapping (pass schema_dn)
-    objecttype_guid_map = adws_objecttype_guid_map(adws_enum, schema_dn=schema_dn)
+    logging.info("Retrieving schema ObjectType GUID mappings...")
+    objecttype_guid_map = adws_objecttype_guid_map(adws_enum, schema_dn=schema_dn, follow_referrals=options.follow_referrals)
     objecttype_guid_map_normalized = {normalize_name(k): v for k, v in objecttype_guid_map.items()}
+    
+    # Check for LAPS support
     laps_guid = objecttype_guid_map_normalized.get(normalize_name("ms-Mcs-AdmPwd"))
     laps2_guid = objecttype_guid_map_normalized.get(normalize_name("msLAPS-EncryptedPassword"))
     has_laps = laps_guid is not None
     has_laps2 = laps2_guid is not None
+    
+    if has_laps:
+        logging.info("LAPS v1 detected in schema")
+    if has_laps2:
+        logging.info("LAPS v2 detected in schema")
 
+    # 4. Main collection query for cache generation
+    logging.info("Collecting objects for cache generation...")
     main_query = "(|(objectCategory=person)(objectClass=msDS-GroupManagedServiceAccount)(objectClass=msDS-ManagedServiceAccount)(objectCategory=computer)(objectCategory=group)(objectClass=organizationalUnit)(objectClass=domain)(objectClass=container)(objectClass=groupPolicyContainer))"
 
+    # Child objects for containment relationships
     child_objects_query = "(|(objectClass=container)(objectClass=organizationalUnit)(sAMAccountType=805306369)(objectClass=group)(&(objectCategory=person)(objectClass=user)))"
-    attributes_child = [ "objectSid", "objectClass", "objectGUID", "distinguishedName", "sAMAccountName", "sAMAccountType"]
+    attributes_child = ["objectSid", "objectClass", "objectGUID", "distinguishedName", "sAMAccountName", "sAMAccountType"]
     
     data_child_main = pull_all_ad_objects(
         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
@@ -145,7 +215,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     )
     all_child_items = data_child_main.get("objects", [])
     
-    # 4. Collecte principale (utilise default_dn pour le base_dn)
+    # Main collection (use default_dn for base_dn)
     data_container_main = pull_all_ad_objects(
         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
         query=main_query, attributes=SOAPHOUND_CACHE_PROPERTIES, base_dn_override=default_dn
@@ -153,20 +223,12 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     all_collected_items = data_container_main.get("objects", [])
 
     if not all_collected_items:
-        logging.error("No objects collected (objs is empty or None)")
+        logging.error("No objects collected (collection is empty or None)")
         sys.exit(1)
 
     objs = all_collected_items
-    # Normalisation des objets si besoin
-    if (isinstance(objs, list) and len(objs) == 1 and isinstance(objs[0], dict) and all(isinstance(v, list) for v in objs[0].values())):
-        objs = fix_superdict_to_list(objs[0])
-    elif isinstance(objs, dict) and all(isinstance(v, list) for v in objs.values()):
-        objs = fix_superdict_to_list(objs)
-    else:
-        if not objs or not isinstance(objs, list) or not isinstance(objs[0], dict):
-            logging.error("Something went wrong with object collected")
-            sys.exit(1)
-
+    
+    # Normalize objects
     for obj in objs:
         dn = obj.get('distinguishedName')
         if isinstance(dn, list):
@@ -177,23 +239,32 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         elif oc is None:
             obj['objectClass'] = []
 
-    # We Generate Soaphound Cache data
-    create_and_combine_soaphound_cache(objs, default_dn, output_dir=options.output_dir)
+    # Generate SOAPHound Cache data with domain name in filename
+    logging.info("Generating SOAPHound cache...")
+    create_and_combine_soaphound_cache(
+        objs, 
+        default_dn, 
+        output_dir=options.output_dir,
+        domain_name=options.domain
+    )
     id_to_type_cache, value_to_id_cache = _generate_individual_caches(objs, default_dn)
 
-    logging.info(f"Start collecting ...")
+    logging.info("Starting collection of AD objects...")
 
-    
-    
-    # --- (1) Collect raw domains ---   
+    # --- Collect raw domains ---
+    logging.info("Collecting domains...")
     raw_domains = collect_domains(options.domain_controller, options.domain, options.username, auth)
     
     # Collect and format containers
+    logging.info("Collecting containers...")
     raw_containers = collect_containers(options.domain_controller, options.domain, options.username, auth)
-    containers_bh = format_containers(raw_containers, options.domain, default_dn, id_to_type_cache, value_to_id_cache, objs, objecttype_guid_map)
+    containers_bh = format_containers(
+        raw_containers, options.domain, default_dn, 
+        id_to_type_cache, value_to_id_cache, objs, objecttype_guid_map
+    )
 
-    # --- (2) Get main domain SID for formatting trusts etc. ---
-    domain_obj = raw_domains[0]  # If only one domain, otherwise adapt according to the context.
+    # Get main domain SID for formatting trusts etc.
+    domain_obj = raw_domains[0]  # If only one domain
     sid_bytes = domain_obj.get("objectSid")
         
     if isinstance(sid_bytes, bytes):
@@ -203,57 +274,80 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     else:
         raise RuntimeError("Unable to find the SID of the primary domain.")
 
-    collect_domain_args = {
-    "username": options.username,
-    "auth": auth
-    }
+    logging.info(f"Domain SID: {domain_sid}")
 
     # Collect and format GPOs
+    logging.info("Collecting GPOs...")
     gpos = collect_gpos(options.domain_controller, options.domain, options.username, auth)
-    gpos_bh = format_gpos(gpos, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
-        
+    gpos_bh = format_gpos(
+        gpos, options.domain, domain_sid, 
+        id_to_type_cache, value_to_id_cache, objecttype_guid_map
+    )
 
     # Collect and format Trusts
-    trusts = collect_trusts(options.domain_controller, options.domain, options.username, auth, domain_sid=domain_sid)
+    logging.info("Collecting trusts...")
+    trusts = collect_trusts(
+        options.domain_controller, options.domain, options.username, auth, 
+        domain_sid=domain_sid
+    )
+    logging.info(f"Trusts collected: {len(trusts)}")
     
-
-    
-    print("Number of trusts collected:", len(trusts))
-    # --- (4) Format domains, inject trusts ---
+    # Format domains with trusts
     domains_bh = format_domains(
-    raw_domains, options.domain, default_dn,
-    id_to_type_cache, value_to_id_cache,
-    all_child_items,   
-    objecttype_guid_map, trusts,
-    domain_functionality=domainFunctionality
-)
+        raw_domains, options.domain, default_dn,
+        id_to_type_cache, value_to_id_cache,
+        all_child_items,   
+        objecttype_guid_map, trusts,
+        domain_functionality=domainFunctionality
+    )
 
-
- 
     # Collect and format OUs
+    logging.info("Collecting OUs...")
     ous = collect_ous(options.domain_controller, options.domain, options.username, auth)
-    ous_bh = format_ous(ous, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
+    ous_bh = format_ous(
+        ous, options.domain, domain_sid, 
+        id_to_type_cache, value_to_id_cache, objecttype_guid_map
+    )
 
     # Collect and format Groups
+    logging.info("Collecting groups...")
     groups = collect_groups(options.domain_controller, options.domain, options.username, auth)
-    groups_bh = format_groups(groups, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
+    groups_bh = format_groups(
+        groups, options.domain, domain_sid, 
+        id_to_type_cache, value_to_id_cache, objecttype_guid_map
+    )
 
     # Collect and format Users
+    logging.info("Collecting users...")
     object_classes = adws_object_classes(adws_enum)
-    users = collect_users(options.domain_controller, options.domain, options.username, auth, adws_object_classes=object_classes,adws_objecttype_guid_map=objecttype_guid_map)
-    users_bh = format_users(users, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
-
+    users = collect_users(
+        options.domain_controller, options.domain, options.username, auth, 
+        adws_object_classes=object_classes, adws_objecttype_guid_map=objecttype_guid_map
+    )
+    users_bh = format_users(
+        users, options.domain, domain_sid, 
+        id_to_type_cache, value_to_id_cache, objecttype_guid_map
+    )
 
     # Collect and format Computers
-    if (options.collectionmethod == "ADWSOnly"):
+    logging.info("Collecting computers...")
+    if options.collectionmethod == "ADWSOnly":
         computers = collect_computers_adws(
             options.domain_controller, options.domain, options.username, auth,
             base_dn_override=default_dn, adws_object_classes=object_classes,
-            has_laps=has_laps, has_lapsv2=has_laps2,objecttype_guid_map=objecttype_guid_map )
+            has_laps=has_laps, has_lapsv2=has_laps2, objecttype_guid_map=objecttype_guid_map
+        )
         
-        computers_bh = format_computers_adws(computers, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map=objecttype_guid_map)
+        computers_bh = format_computers_adws(
+            computers, options.domain, domain_sid, 
+            id_to_type_cache, value_to_id_cache, objecttype_guid_map=objecttype_guid_map
+        )
     else:
-        smb_auth = ADAuthentication(username=options.username, password=options.password, domain=options.domain, lm_hash=lm, nt_hash=nt, aeskey='', kdc=options.domain_controller)
+        # Full collection with RPC/SMB sessions
+        smb_auth = ADAuthentication(
+            username=options.username, password=options.password, domain=options.domain, 
+            lm_hash=lm, nt_hash=nt, aeskey='', kdc=options.domain_controller
+        )
         addomain = ADDomain(
             name=options.domain,
             netbios_name=None,
@@ -264,7 +358,8 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         addomain.auth = smb_auth
         addomain.dnscache = DNSCache()
         addomain.dnsresolver = dns.resolver.Resolver()
-        addomain.dns_tcp = dns.resolver.Resolver(); addomain.dns_tcp.use_tcp = True
+        addomain.dns_tcp = dns.resolver.Resolver()
+        addomain.dns_tcp.use_tcp = True
         addomain.sidcache = ObjectCache()
         addomain.samcache = ObjectCache()
         addomain.computersidcache = ObjectCache()
@@ -287,8 +382,12 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
             bh_rpc_context=addomain, num_workers=options.worker_num
         )
 
+    # Generate timestamp for output files
     timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d%H%M%S') + "_"
     output_dir = options.output_dir
+    
+    # Export all collections to JSON
+    logging.info("Exporting BloodHound JSON files...")
     safe_export_bloodhound_json(domains_bh, os.path.join(output_dir, timestamp + "domains.json"))
     safe_export_bloodhound_json(containers_bh, os.path.join(output_dir, timestamp + "containers.json"))
     safe_export_bloodhound_json(gpos_bh, os.path.join(output_dir, timestamp + "gpos.json"))
@@ -297,8 +396,25 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     safe_export_bloodhound_json(users_bh, os.path.join(output_dir, timestamp + "users.json"))
     safe_export_bloodhound_json(computers_bh, os.path.join(output_dir, timestamp + "computers.json"))
 
+    # Summary statistics
+    logging.info("=" * 60)
+    logging.info("COLLECTION SUMMARY")
+    logging.info("=" * 60)
+    logging.info(f"Domains:    {domains_bh['meta']['count']}")
+    logging.info(f"Containers: {containers_bh['meta']['count']}")
+    logging.info(f"GPOs:       {gpos_bh['meta']['count']}")
+    logging.info(f"OUs:        {ous_bh['meta']['count']}")
+    logging.info(f"Groups:     {groups_bh['meta']['count']}")
+    logging.info(f"Users:      {users_bh['meta']['count']}")
+    logging.info(f"Computers:  {computers_bh['meta']['count']}")
+    logging.info("=" * 60)
+
+    # Create ZIP archive if requested
     if options.zip:
+        logging.info("Creating ZIP archive...")
         zip_bloodhound_jsons(output_dir, timestamp, timestamp + "bloodhound.zip")
+
+    logging.info("Collection completed successfully!")
 
 if __name__ == "__main__":
     main()
