@@ -17,7 +17,7 @@ def gen_cli_args():
     #bh_group.add_argument("--cache", action="store_true", help="Create/regenerate SOAPHound compatible cache files from fresh ADWS data.")
 
 
-
+    
     parser.add_argument('-c',
                         '--collectionmethod',
                         action='store',
@@ -28,6 +28,10 @@ def gen_cli_args():
                         action='store',
                         required=True,
                         help='Domain to query.')
+    parser.add_argument('--follow-referrals', 
+                    action='store_true', 
+                    default=True,
+                    help='Automatically follow AD referrals to parent domains (default: True)')
     parser.add_argument('-v',
                         action='store_true',
                         help='Enable verbose output.')
@@ -77,7 +81,7 @@ def gen_cli_args():
                         default=100,
                         help='Number of workers, default 100')
 
-    coopts.add_argument("--output-dir", type=str, default="", help="Output folder (default .).")
+    coopts.add_argument("--output-dir", type=str, default="output", help="Directory to write output files (default: output)")
 
 
     if len(sys.argv) == 1:
