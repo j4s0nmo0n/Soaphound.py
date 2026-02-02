@@ -9,38 +9,52 @@ More informations: [you may check out the short blog post](https://j4s0nmo0n.git
 
 # Usage
 ```
-usage: soaphound [-h] [-c COLLECTIONMETHOD] -d DOMAIN [-v] [--ts] -u USERNAME [-p PASSWORD] [--hashes HASHES] -dc HOST [--zip] [-op PREFIX_NAME] [-wk NUM_WORKERS] [--output-dir OUTPUT_DIR]
+ .oooooo..o                                oooo                                                .o8                             
+d8P'    `Y8                                `888                                               "888                             
+Y88bo.       .ooooo.   .oooo.   oo.ooooo.   888 .oo.    .ooooo.  oooo  oooo  ooo. .oo.    .oooo888      oo.ooooo.  oooo    ooo 
+ `"Y8888o.  d88' `88b `P  )88b   888' `88b  888P"Y88b  d88' `88b `888  `888  `888P"Y88b  d88' `888       888' `88b  `88.  .8'  
+     `"Y88b 888   888  .oP"888   888   888  888   888  888   888  888   888   888   888  888   888       888   888   `88..8'   
+oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   888   888  888   888  .o.  888   888    `888'    
+8""88888P'  `Y8bod8P' `Y888""8o  888bod8P' o888o o888o `Y8bod8P'  `V88V"V8P' o888o o888o `Y8bod88P" Y8P  888bod8P'     .8'     
+                                 888                                                                     888       .o..P'      
+                                o888o                                                                   o888o      `Y8P'       
+                                                                                                    (made by @belettet1m0ree)
 
+
+usage: soaphound [-h] [-c COLLECTIONMETHOD] -d DOMAIN [--follow-referrals] [-v] [--ts] -u USERNAME [-p PASSWORD] [--hashes HASHES] -dc HOST [--zip] [-op PREFIX_NAME]
+                 [-wk NUM_WORKERS] [--output-dir OUTPUT_DIR]
+                                                                                     
 Python based ingestor for BloodHound using ADWS
-
-options:
+                                                                                     
+options:                                                                             
   -h, --help            show this help message and exit
   -c COLLECTIONMETHOD, --collectionmethod COLLECTIONMETHOD
                         Which information to collect : Default or ADWSOnly (no computer connections).
-  -d DOMAIN, --domain DOMAIN
-                        Domain to query.
+  -d DOMAIN, --domain DOMAIN                                                                                                                                              
+                        Domain to query.                                             
+  --follow-referrals    Automatically follow AD referrals to parent domains (default: True)
   -v                    Enable verbose output.
   --ts                  Add timestamp to logs.
-
-authentication options:
-  NTLM is the only method supported at the moment.
-
+                                          
+authentication options:         
+  NTLM is the only method supported at the moment.         
+                                          
   -u USERNAME, --username USERNAME
                         Username. Format: username[@domain]; If the domain is unspecified, the current domain is used.
   -p PASSWORD, --password PASSWORD
                         Password
   --hashes HASHES       LM:NLTM hashes
-
-collection options:
+                                          
+collection options:        
   -dc HOST, --domain-controller HOST
                         DC to query (hostname)
   --zip                 Compress the JSON output files into a zip archive.
   -op PREFIX_NAME, --outputprefix PREFIX_NAME
                         String to prepend to output file names.
-  -wk NUM_WORKERS, --worker_num NUM_WORKERS
+  -wk NUM_WORKERS, --worker_num NUM_WORKERS        
                         Number of workers, default 100
-  --output-dir OUTPUT_DIR
-                        Output folder (default .).
+  --output-dir OUTPUT_DIR                                                            
+                        Directory to write output files (default: output)
 ```
 
 # Installation
@@ -74,3 +88,4 @@ poetry run soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --outpu
 - [ERNW](https://insinuator.net/2016/08/pentesting-webservices-with-net-tcp-binding/) for the initial boost.
 - [X-force Red](https://www.ibm.com/think/x-force/stealthy-enumeration-of-active-directory-environments-through-adws) for their brilliant implementation of NBFX and research insights.
 - [Rabobank red team](https://rabobank.jobs/en/techblog/adws-an-unconventional-path-into-active-directory-luc-kolen/) for sharing valuable resources and operational insights.
+
