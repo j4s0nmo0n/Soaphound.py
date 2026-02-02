@@ -26,7 +26,6 @@ SOAPHOUND_LDAP_PROPERTIES = sorted(list(set([
 
 SOAPHOUND_CACHE_PROPERTIES = ["distinguishedName", "objectSid", "ObjectGuid", "ObjectClass"]
 
-
 SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT = {
     "user": 0, "computer": 1, "group": 2, "grouppolicycontainer": 3,
     "domaindns": 4, "domain": 4, "organizationalunit": 5,
@@ -133,20 +132,37 @@ def pull_all_ad_objects(ip: str, domain: str, username: str, auth: NTLMAuth, que
     logging.debug(f"Parsed {len(all_pulled_items)} objects from ADWS response for query '{query}' (Base DN target: {effective_base_dn}).")
     return {"objects": all_pulled_items, "domain_root_dn": effective_base_dn, "effective_base_dn_used": effective_base_dn}
 
-def adws_objecttype_guid_map(adws, schema_dn) -> dict:
+def adws_objecttype_guid_map(adws, schema_dn, follow_referrals=True) -> dict:
     """
     Retrieves the lDAPDisplayName → schemaIDGUID map (as string) via ADWS for classSchema and attributeSchema.
     schema_dn MUST be passed from the main script (do not fetch it here).
+    
+    Args:
+        adws: ADWS connection object
+        schema_dn: Schema DN from RootDSE (required)
+        follow_referrals: Whether to follow AD referrals (default: True)
     """
+    if schema_dn is None:
+        raise ValueError("schema_dn must be provided from RootDSE")
+    
     query = "(objectClass=*)"
     attributes = ["name", "schemaIDGUID", "lDAPDisplayName"]
     mapping = {}
+    
     NAMESPACES = {
         "ns1": "http://schemas.microsoft.com/2008/1/ActiveDirectory/Data",
         "ns2": "http://schemas.microsoft.com/2008/1/ActiveDirectory",
     }
-
-    et_classes = adws.pull(query, attributes, use_schema=True, base_object_dn_for_soap=schema_dn)
+    
+    # Pass follow_referrals to pull()
+    et_classes = adws.pull(
+        query, 
+        attributes, 
+        use_schema=True, 
+        base_object_dn_for_soap=schema_dn,
+        follow_referrals=follow_referrals
+    )
+    
     if et_classes is not None:
         for item in et_classes.findall(".//ns1:classSchema", NAMESPACES):
             ldn = item.find(".//ns1:lDAPDisplayName/ns2:value", NAMESPACES)
@@ -158,7 +174,18 @@ def adws_objecttype_guid_map(adws, schema_dn) -> dict:
                     mapping[ldn.text.lower()] = guid_str
                 except Exception:
                     pass
-        for item in et_classes.findall(".//ns1:attributeSchema", NAMESPACES):
+    
+    # attributeSchema - also pass follow_referrals
+    et_attrs = adws.pull(
+        query, 
+        attributes, 
+        use_schema=True, 
+        base_object_dn_for_soap=schema_dn,
+        follow_referrals=follow_referrals
+    )
+    
+    if et_attrs is not None:
+        for item in et_attrs.findall(".//ns1:attributeSchema", NAMESPACES):
             ldn = item.find(".//ns1:lDAPDisplayName/ns2:value", NAMESPACES)
             guid = item.find(".//ns1:schemaIDGUID/ns2:value", NAMESPACES)
             if ldn is not None and ldn.text and guid is not None and guid.text:
@@ -167,7 +194,8 @@ def adws_objecttype_guid_map(adws, schema_dn) -> dict:
                     guid_str = str(UUID(bytes_le=guid_bytes)).lower()
                     mapping[ldn.text.lower()] = guid_str
                 except Exception:
-                    pass        
+                    pass
+    
     return mapping
 
 def _generate_individual_caches(all_pulled_items, domain_root_dn):
@@ -197,7 +225,7 @@ def _generate_individual_caches(all_pulled_items, domain_root_dn):
         primary_id = sid_str if sid_str else guid_str
         oc_lower_list_for_check = [str(oc).lower() for oc in object_classes] if isinstance(object_classes, list) else ([str(object_classes).lower()] if object_classes else [])
 
-        if "cn=configuration,".lower() in (dn or "") or \
+        if "cn=configuration,".lower() in (dn or "").lower() or \
            "pkicertificatetemplate" in oc_lower_list_for_check or \
            "certificationauthority" in oc_lower_list_for_check or \
            "pkienrollmentservice" in oc_lower_list_for_check or \
@@ -217,28 +245,8 @@ def _generate_individual_caches(all_pulled_items, domain_root_dn):
     return id_to_type_cache, value_to_id_cache
 
 def get_soaphound_type_id(dn, object_classes, object_sid_str, domain_root_dn):
-    if not isinstance(object_classes, list): object_classes = [object_classes] if object_classes else []
+    if not isinstance(object_classes, list): object_classes = [object_classes]
     object_classes_lower = [str(oc).lower() for oc in object_classes]
-
-    # Explicit handling for managed/service accounts ----
-    # gMSA / MSA objectClass examples: "msds-groupmanagedserviceaccount", "msds-managedserviceaccount"
-    # other service account indicator: "serviceaccount" or "msds-servicedomain" (varies by schema)
-    
-    msa_markers = (
-        'msds-groupmanagedserviceaccount',
-        'msds-managedserviceaccount',
-        'msds-delegatedmanagedserviceaccount', 
-        'managedserviceaccount',
-        'serviceaccount'
-    )
-
-    for m in msa_markers:
-        if any(m in oc for oc in object_classes_lower):
-            # Traiter les comptes managés comme "user" par défaut.
-            # Si tu veux les considérer comme "computer", retourne SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("computer")
-            return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("user", 0)
-
-    # existing special cases
     if "pkicertificatetemplate" in object_classes_lower: return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("pkicertificatetemplate")
     if "certificationauthority" in object_classes_lower: return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("certificationauthority")
     if "pkienrollmentservice" in object_classes_lower: return SOAPHOUND_OBJECT_CLASS_MAPPING_TO_INT.get("pkienrollmentservice")
@@ -365,16 +373,37 @@ def filetime_to_unix(val):
         except Exception as e:
             print(f"filetime_to_unix: failed to parse {val} - {e}")
             return 0
+    return 0
 
-def create_and_combine_soaphound_cache(all_pulled_items, domain_root_dn, output_dir="."):
-    combined_output_path = os.path.join(output_dir, "Cache.json")
+def create_and_combine_soaphound_cache(all_pulled_items, domain_root_dn, output_dir=".", domain_name=None):
+    """
+    Generate and save the SOAPHound cache (IdToTypeCache + ValueToIdCache).
+    
+    Args:
+        all_pulled_items: List of AD objects
+        domain_root_dn: DN of the domain root
+        output_dir: Output directory (default: current directory)
+        domain_name: Domain name to include in filename (optional)
+    """
+    # Build the cache filename with domain name
+    if domain_name:
+        safe_domain = domain_name.lower().replace(' ', '_')
+        cache_filename = f"cache_{safe_domain}.json"
+    else:
+        cache_filename = "Cache.json"
+    
+    combined_output_path = os.path.join(output_dir, cache_filename)
+    
     # Ensure directory exists before writing
     os.makedirs(output_dir, exist_ok=True)
+    
     logging.info(f"Initiating SOAPHound cache generation to {combined_output_path}...")
     id_to_type_dict, value_to_id_dict = _generate_individual_caches(all_pulled_items, domain_root_dn)
+    
     if not id_to_type_dict or not value_to_id_dict:
         logging.error("Failed to generate individual cache dictionaries. Combined cache not created.")
         return
+    
     try:
         combined_data = {"IdToTypeCache": id_to_type_dict, "ValueToIdCache": value_to_id_dict}
         with open(combined_output_path, 'w', encoding='utf-8') as f:
