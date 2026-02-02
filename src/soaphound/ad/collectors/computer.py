@@ -18,15 +18,51 @@ from soaphound.lib.authentication import ADAuthentication
 from soaphound.ad.acls import normalize_name
 
 
-def get_output_dir_from_argv():
+def get_cache_file_path(output_dir, domain_name):
+    """
+    Get the cache file path with domain name.
+    
+    Args:
+        output_dir: Output directory
+        domain_name: Domain name
+        
+    Returns:
+        str: Path to cache file
+    """
+    cache_filename = f"cache_{domain_name}.json"
+    return os.path.join(output_dir, cache_filename)
+
+def get_output_dir_and_domain_from_argv():
+    """
+    Extract output directory and domain from command line arguments.
+    
+    Returns:
+        tuple: (output_dir, domain_name)
+    """
+    output_dir = "output"
+    domain_name = None
+    
     if "--output-dir" in sys.argv:
         idx = sys.argv.index("--output-dir")
         if idx + 1 < len(sys.argv):
-            return sys.argv[idx + 1]
-    return "output"
+            output_dir = sys.argv[idx + 1]
+    
+    if "-d" in sys.argv:
+        idx = sys.argv.index("-d")
+        if idx + 1 < len(sys.argv):
+            domain_name = sys.argv[idx + 1]
+    elif "--domain" in sys.argv:
+        idx = sys.argv.index("--domain")
+        if idx + 1 < len(sys.argv):
+            domain_name = sys.argv[idx + 1]
+    
+    return output_dir, domain_name
 
-output_dir = get_output_dir_from_argv()
-cache_file_path = os.path.join(output_dir, "Cache.json")
+output_dir, domain_name = get_output_dir_and_domain_from_argv()
+if domain_name:
+    cache_file_path = get_cache_file_path(output_dir, domain_name)
+else:
+    cache_file_path = os.path.join(output_dir, "Cache.json")
 
 
 def collect_computers(
@@ -36,7 +72,7 @@ def collect_computers(
     auth=None,
     base_dn_override=None,
     cache_file=None,
-    adws_object_classes=None,has_laps=False,
+    adws_object_classes=None, has_laps=False,
     has_lapsv2=False,
     objecttype_guid_map=None
 ):
@@ -64,7 +100,7 @@ def collect_computers(
             o for o in objs
             if o.get("distinguishedName") and isinstance(o.get("distinguishedName"), str)
         ]
-        print(f"[INFO] Computers collected : {len(computers)}")
+        print(f"[INFO] Computers collected: {len(computers)}")
         return computers
 
     # --- Attributes to collect ---
@@ -117,11 +153,11 @@ def collect_computers(
             obj["objectClass"] = [oc]
         elif oc is None:
             obj["objectClass"] = []
-        # DN en string
+        # DN as string
         dn = ADUtils.get_entry_property(obj, "distinguishedName", default="")
         if isinstance(dn, list):
             obj["distinguishedName"] = dn[0] if dn else ""
-        # GUID en string upper
+        # GUID as upper string
         guid = ADUtils.get_entry_property(obj, "objectGUID")
         if isinstance(guid, bytes):
             try:
@@ -129,7 +165,7 @@ def collect_computers(
             except Exception:
                 pass
 
-    print(f"[INFO] Computers collected : {len(raw_objects)}")
+    print(f"[INFO] Computers collected: {len(raw_objects)}")
     return raw_objects
 
 
@@ -143,10 +179,6 @@ def prefix_well_known_sid(sid: str, domain_name: str, domain_sid: str, well_know
     return sid
 
 import queue
-
-
-
-
 
 
 def format_computers(
@@ -190,10 +222,6 @@ def format_computers(
     results_q = queue.Queue()
 
     for obj in computers:
-        
-       
-        #qprint(f"[DEBUG COLLECTE] {obj.get('name')} UAC: {obj.get('userAccountControl')}  KEYS: {list(obj.keys())}")
-        
         dn = obj.get("distinguishedName", "")
         if isinstance(dn, list):
             dn = dn[0] if dn else ""
@@ -216,7 +244,6 @@ def format_computers(
         sAM = obj.get("sAMAccountName", "")
         hostname = obj.get("dNSHostName", "") or sAM[:-1].upper()
         entry = {"attributes": obj}
-        #process_queue.put((hostname, sAM, comp_sid, entry, results_q, all_sessions_users))
         jobs.append((hostname, sAM, comp_sid, entry, results_q, all_sessions_users))
         obj_by_hostname[hostname.lower()] = obj
 
@@ -226,7 +253,6 @@ def format_computers(
         t.daemon = True
         t.start()
         threads.append(t)
-
 
     process_queue.join()
 
@@ -259,7 +285,6 @@ def format_computers(
         with open(cache_file_path, "r", encoding="utf-8") as f:
             _cache_json_loaded = json.load(f)
     except Exception as e:
-        #(f"ERREUR lors du chargement de {cache_file_path}: {e}")
         _cache_json_loaded = {}
 
     cache_disk = _cache_json_loaded.get("ValueToIdCache", {})
@@ -347,7 +372,7 @@ def format_computers(
         allowed_to_delegate_list = []
         for host_spn in delegatehosts_raw:
             if not host_spn or '/' not in host_spn:
-                logging.debug("SPN de délégation invalide ignoré : %s", host_spn)
+                logging.debug("Invalid delegation SPN ignored: %s", host_spn)
                 continue
             target_hostname = host_spn.split('/')[1].split(':')[0].upper()
             target_short = target_hostname.split('.')[0]
@@ -369,9 +394,9 @@ def format_computers(
                     "ObjectType": target_type_label
                 })
             else:
-                logging.warning("Impossible de résoudre le SID pour la cible de délégation '%s' via le cache.", target_hostname)
+                logging.warning("Unable to resolve SID for delegation target '%s' via cache.", target_hostname)
 
-                # --- LAPS v1 and/or v2 detection ---
+        # --- LAPS v1 and/or v2 detection ---
         laps_signals = [
             "ms-Mcs-AdmPwd", "ms-Mcs-AdmPwdExpirationTime",
             "msLAPS-EncryptedPassword", "msLAPS-PasswordExpirationTime",
@@ -379,7 +404,6 @@ def format_computers(
             "msLAPS-EncryptedDSRMPassword", "msLAPS-EncryptedDSRMPasswordHistory"
         ]
         has_laps = any(obj.get(attr) not in (None, "", b"") for attr in laps_signals)
-
 
         aces_computer, isaclprotected = _parse_aces(
             obj.get("nTSecurityDescriptor"),
@@ -410,7 +434,7 @@ def format_computers(
                     # Follow BloodHound behavior: ignore Owner; only include meaningful rights (GenericAll is a clear signal)
                     if right == "Owner":
                         continue
-                    if right == "GenericAll" or right == "WriteDacl" or right == "WriteOwner" or right == "AddKeyCredentialLink" or right == "ReadLAPSPassword":
+                    if right in ("GenericAll", "WriteDacl", "WriteOwner", "AddKeyCredentialLink", "ReadLAPSPassword"):
                         allowed_to_act_list.append({
                             "ObjectIdentifier": a["PrincipalSID"],
                             "ObjectType": a.get("PrincipalType", "User")
@@ -418,12 +442,6 @@ def format_computers(
             except Exception as e:
                 logging.debug("Failed to parse msDS-AllowedToActOnBehalfOfOtherIdentity for %s: %s", hostname, e)
 
-        # If no explicit RBCD entries were found, left as empty list (matching BloodHound default)    
-        
-        #print(f"[DEBUG][UAC] {hostname}: userAccountControl={uac} (hex={uac:x}), unconstrained={(uac & 0x00080000) == 0x00080000}")
-        
-        #print(f"[DEBUG][FINAL OBJ] {hostname} OBJ: {obj}")
-        
         props = {
             "name": hostname.upper() if hostname.upper().endswith(domain_upper) else f"{hostname.upper()}.{domain_upper}",
             "domain": domain_upper,
@@ -471,9 +489,10 @@ def format_computers(
         sessions_results = []
         for user in user_sessions:
             sessions_results.append({
-                    "UserSID": user['usersid'],
-                    "ComputerSID": user['computersid'],
-                    "SessionType": user['session_type']})
+                "UserSID": user['usersid'],
+                "ComputerSID": user['computersid'],
+                "SessionType": user['session_type']
+            })
 
         computer_bh_entry = {
             "ObjectIdentifier": comp_sid,
@@ -499,8 +518,8 @@ def format_computers(
             "DumpSMSAPassword": []
         }
         computers_by_sid[comp_sid] = computer_bh_entry
-       # formatted_computers.append(computer_bh_entry)
         formatted_computers = list(computers_by_sid.values())
+
     print("\n========== Summary of session users connected on machines ==========")
     for k in sorted(all_sessions_users.keys()):
         print(f"{k} = {all_sessions_users[k]}")
@@ -515,4 +534,3 @@ def format_computers(
             "version": 6
         }
     }
-
