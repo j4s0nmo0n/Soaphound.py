@@ -18,9 +18,6 @@ from impacket.ldap.ldaptypes import (
 )
 from pyasn1.type.useful import GeneralizedTime
 
-# Make sure these relative imports work with your project structure
-# If adws.py is in src/, then the following imports are correct if ms_nmf, ms_nns, soap_templates are also in src/
-# Otherwise, adjust the paths. For example, from .ms_nmf import ... if in the same folder.
 import soaphound.ad.ms_nmf as ms_nmf
 from .ms_nns import NNS
 from .soap_templates import (
@@ -31,7 +28,7 @@ from .soap_templates import (
     LDAP_ROOT_DSE_FSTRING,
 )
 
-# --- Enums and Constants (from your original file) ---
+# --- Enums and Constants ---
 class SystemFlags(IntFlag):
     NONE = 0x00000000
     NO_REPLICATION = 0x00000001
@@ -119,7 +116,7 @@ WELL_KNOWN_SIDS = {
     "S-1-5-6": "Service", "S-1-5-7": "Anonymous", "S-1-5-8": "Proxy",
     "S-1-5-9": "Enterprise Domain Controllers", "S-1-5-10": "Principal Self",
     "S-1-5-11": "Authenticated Users", "S-1-5-12": "Restricted Code", "S-1-5-13": "Terminal Server Users",
-    "S-1-5-14": "Remote Interactive Logon", "S-1-5-15": "This Organization", "S-1-5-17": "This Organization",  # IIS_USRS
+    "S-1-5-14": "Remote Interactive Logon", "S-1-5-15": "This Organization", "S-1-5-17": "This Organization",
     "S-1-5-18": "Local System", "S-1-5-19": "NT Authority", "S-1-5-20": "NT Authority",
     "S-1-5-32-544": "Administrators", "S-1-5-32-545": "Users", "S-1-5-32-546": "Guests",
     "S-1-5-32-547": "Power Users", "S-1-5-32-548": "Account Operators", "S-1-5-32-549": "Server Operators",
@@ -140,9 +137,28 @@ WELL_KNOWN_SIDS = {
     "S-1-5-32-577": "BUILTIN\\RDS Management Servers", "S-1-5-32-578": "BUILTIN\\Hyper-V Administrators",
     "S-1-5-32-579": "BUILTIN\\Access Control Assistance Operators", "S-1-5-32-580": "BUILTIN\\Remote Management Users",
 }
-# --- End Enums and Constants ---
 
-class ADWSError(Exception): ...
+class ADWSError(Exception): 
+     """Base exception for ADWS errors"""
+     pass
+
+class ADWSReferralError(ADWSError):
+    """Exception raised when AD returns a referral"""
+    def __init__(self, referral_url: str, message: str = ""):
+        self.referral_url = referral_url
+        self.referral_dc = self._extract_dc_from_url(referral_url)
+        super().__init__(f"AD Referral: {message} -> {referral_url}")
+    
+    @staticmethod
+    def _extract_dc_from_url(url: str) -> str:
+        """
+        Extract DC hostname from LDAP referral URL
+        Example: ldap://sub.tld/CN=Schema,... -> sub.tld
+        """
+        import re
+        match = re.search(r'ldap://([^/]+)', url)
+        return match.group(1) if match else ""
+
 class ADWSAuthType: ...
 
 class NTLMAuth(ADWSAuthType):
@@ -257,12 +273,12 @@ class ADWSConnect:
             'ad': "http://schemas.microsoft.com/2008/1/ActiveDirectory",
         }
 
-        # Look for schemaNamingContext in the XML (value in <ad:value>)
+        # Look for schemaNamingContext in the XML
         val_elem = et.find(".//addata:schemaNamingContext/ad:value", namespaces=NAMESPACES)
         if val_elem is not None and val_elem.text:
             return val_elem.text.strip()
 
-        # Fallback: look in namingContexts (value in <ad:value>)
+        # Fallback: look in namingContexts
         for alt_val in et.findall(".//addata:namingContexts/ad:value", namespaces=NAMESPACES):
             if alt_val is not None and alt_val.text and "Schema" in alt_val.text:
                 return alt_val.text.strip()
@@ -323,8 +339,7 @@ class ADWSConnect:
             "namingContexts": getvals(".//addata:namingContexts/ad:value"),
             "domainFunctionality": getvals(".//addata:domainFunctionality/ad:value"),
             "forestFunctionality": getval(".//addata:forestFunctionality/ad:value")
-    }
-
+        }
 
     def _pull_results(self, remoteName: str, nmf: ms_nmf.NMFConnection, enum_ctx: str) -> tuple[ElementTree.Element | None, bool]:
         pull_vars = {"uuid": str(uuid4()), "fqdn": remoteName, "enum_ctx": enum_ctx}
@@ -345,40 +360,138 @@ class ADWSConnect:
         if not xmlstr:
             logging.error("Received empty XML string from server.")
             return None
-        try:
-            parsed_et = ElementTree.fromstring(xmlstr)
-
-            # Explicitly check for SOAP fault
-            fault_node_s = parsed_et.find(f".//{{{NAMESPACES['s']}}}Fault")
-            fault_node_soapenv = parsed_et.find(f".//{{{NAMESPACES['soapenv']}}}Fault")
-            fault_node = fault_node_s if fault_node_s is not None else fault_node_soapenv
-
-            if fault_node is not None:
-                reason_text_s = fault_node.findtext(f".//{{{NAMESPACES['s']}}}Reason/{{{NAMESPACES['s']}}}Text")
-                reason_text_soapenv = fault_node.findtext(f".//{{{NAMESPACES['soapenv']}}}Reason/{{{NAMESPACES['soapenv']}}}Text")
-                reason = reason_text_s or reason_text_soapenv or "Unknown SOAP Fault reason"
-
-                detail_node_s = fault_node.find(f".//{{{NAMESPACES['s']}}}Detail")
-                detail_node_soapenv = fault_node.find(f".//{{{NAMESPACES['soapenv']}}}Detail")
-                detail_node = detail_node_s if detail_node_s is not None else detail_node_soapenv
-                detail_text = ElementTree.tostring(detail_node, encoding='unicode').strip() if detail_node is not None else "No detail"
-
-                logging.error(f"SOAP Fault received: {reason}\nDetail: {detail_text}")
-                return None
-
-            return parsed_et
-        except ElementTree.ParseError as e_parse:
-            logging.error(f"XML ParseError in _handle_str_to_xml: {e_parse}. XML (first 500 chars): {xmlstr[:500]}")
-            # Try to manually extract the error message if parsing completely fails
-            if ":Text" in xmlstr:
-                start_tag_search = xmlstr.find(":Text>")
-                if start_tag_search != -1:
-                    starttag = start_tag_search + len(":Text>")
-                    endtag = xmlstr.find("</", starttag)
-                    if endtag != -1:
-                        fault_text = xmlstr[starttag: endtag]
-                        logging.error(f"Manually extracted text (possibly fault): {fault_text.strip()}")
+        
+        original_length = len(xmlstr)
+        logging.debug(f"Processing XML response ({original_length} bytes)")
+        
+        # 1. Clean invalid characters
+        xmlstr = xmlstr.strip().replace('\x00', '')
+        xmlstr = ''.join(c for c in xmlstr if ord(c) >= 32 or c in '\t\n\r')
+        
+        cleaned_length = len(xmlstr)
+        if cleaned_length != original_length:
+            removed = original_length - cleaned_length
+            logging.debug(f"Cleaned XML: removed {removed} invalid characters")
+        
+        # 2. Check envelope integrity
+        if '</s:Envelope>' not in xmlstr:
+            logging.error("XML truncated - missing closing </s:Envelope>")
+            logging.debug(f"Last 200 chars of truncated XML: {repr(xmlstr[-200:])}")
             return None
+        
+        # 3. Truncate garbage after </s:Envelope>
+        first_close = xmlstr.find('</s:Envelope>') + len('</s:Envelope>')
+        if first_close < len(xmlstr):
+            garbage_size = len(xmlstr) - first_close
+            logging.warning(f"Truncating {garbage_size} bytes after envelope")
+            logging.debug(f"Garbage preview: {repr(xmlstr[first_close:first_close+100])}")
+            xmlstr = xmlstr[:first_close]
+        
+        # 4. Quick Fault detection before full parsing
+        has_fault = ":Fault>" in xmlstr and ":Reason>" in xmlstr
+        
+        # 5. Parsing attempt
+        try:
+            et = ElementTree.fromstring(xmlstr)
+            logging.debug("XML parsed successfully")
+        except ElementTree.ParseError as e:
+            error_str = str(e)
+            logging.error(f"XML ParseError: {error_str}")
+            
+            # Extract error position
+            col = 0
+            if 'column' in error_str:
+                try:
+                    col = int(error_str.split('column ')[-1].split()[0])
+                    logging.debug(f"Error at column {col}")
+                except:
+                    pass
+            
+            # Context around error (±100 characters)
+            snippet_start = max(0, col - 100)
+            snippet_end = min(len(xmlstr), col + 100)
+            snippet = xmlstr[snippet_start:snippet_end]
+            logging.error(f"Error context (column {col}): {repr(snippet)}")
+            
+            # In debug mode, save problematic XML
+            if logging.getLogger().isEnabledFor(logging.DEBUG):
+                debug_file = f"failed_xml_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xml"
+                try:
+                    with open(debug_file, 'w', encoding='utf-8') as f:
+                        f.write(xmlstr)
+                    logging.debug(f"Failed XML saved to: {debug_file}")
+                except Exception as save_err:
+                    logging.debug(f"Could not save failed XML: {save_err}")
+            
+            # If it's a Fault, attempt manual extraction
+            if has_fault:
+                fault_msg = self._manually_extract_fault(xmlstr)
+                logging.error(f"Extracted SOAP Fault: {fault_msg}")
+                raise ADWSError(f"SOAP Fault: {fault_msg}")
+            
+            # Otherwise return None to continue enumeration
+            return None
+        
+        # 6. Check SOAP Fault in parsed XML
+        fault_node_s = et.find(f".//{{{NAMESPACES['s']}}}Fault")
+        fault_node_soapenv = et.find(f".//{{{NAMESPACES['soapenv']}}}Fault")
+        fault_node = fault_node_s if fault_node_s is not None else fault_node_soapenv
+        
+        if fault_node is not None:
+            logging.debug("SOAP Fault detected in parsed XML")
+            
+            # Extract fault reason
+            reason_text_s = fault_node.findtext(f".//{{{NAMESPACES['s']}}}Reason/{{{NAMESPACES['s']}}}Text")
+            reason_text_soapenv = fault_node.findtext(f".//{{{NAMESPACES['soapenv']}}}Reason/{{{NAMESPACES['soapenv']}}}Text")
+            reason = reason_text_s or reason_text_soapenv or "Unknown SOAP Fault reason"
+            
+            # Extract fault detail
+            detail_node_s = fault_node.find(f".//{{{NAMESPACES['s']}}}Detail")
+            detail_node_soapenv = fault_node.find(f".//{{{NAMESPACES['soapenv']}}}Detail")
+            detail_node = detail_node_s if detail_node_s is not None else detail_node_soapenv
+            
+            # Check if this is a referral (error code 8235)
+            if detail_node is not None:
+                try:
+                    win32_error = detail_node.findtext(".//{http://schemas.microsoft.com/2008/1/ActiveDirectory}Win32ErrorCode")
+                    referral_url = detail_node.findtext(".//{http://schemas.microsoft.com/2008/1/ActiveDirectory}Referral")
+                    
+                    if win32_error == "8235" and referral_url:
+                        logging.warning(f"AD Referral detected: {referral_url}")
+                        raise ADWSReferralError(referral_url, reason)
+                except ADWSReferralError:
+                    raise  # Re-raise referral errors
+                except Exception as e:
+                    logging.debug(f"Error parsing fault detail for referral: {e}")
+            
+            # For other faults, raise standard error
+            detail_text = ElementTree.tostring(detail_node, encoding='unicode').strip() if detail_node is not None else "No detail"
+            logging.error(f"SOAP Fault received: {reason}")
+            logging.debug(f"Fault detail: {detail_text}")
+            raise ADWSError(f"{reason}\nDetail: {detail_text}")
+        
+        return et
+    def _manually_extract_fault(self, xml_str: str) -> str:
+        """Manual extraction of Fault message when XML doesn't parse"""
+        import re
+        
+        # Search for text between :Text tags
+        match = re.search(r':Text[^>]*>([^<]+)<', xml_str)
+        if match:
+            return match.group(1).strip()
+        
+        # Fallback: search for anything after :Text
+        start = xml_str.find(":Text")
+        if start != -1:
+            start += len(":Text")
+            # Skip opening '>'
+            while start < len(xml_str) and xml_str[start] in '> \n\r\t':
+                start += 1
+            end = xml_str.find("</", start)
+            if end != -1:
+                return xml_str[start:end].strip()
+        
+        return "Could not extract fault message"
 
     def _get_tag_name(self, elem: ElementTree.Element) -> str:
         return elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
@@ -428,41 +541,93 @@ class ADWSConnect:
     def pull(
         self, query: str, attributes: list,
         print_incrementally: bool = False,
-        base_object_dn_for_soap: str | None = None, use_schema=False
+        base_object_dn_for_soap: str | None = None, use_schema=False,
+        follow_referrals: bool = True
     ) -> ElementTree.Element | None:
         if self._resource != "Enumeration":
             raise NotImplementedError("Pull is only supported on 'pull' (Enumeration) clients")
-        if use_schema:
-            enum_ctx = self._query_enumeration(
-                remoteName=self._fqdn, nmf=self._nmf, query=query,
-                attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap, use_schema=True
-            )
-        else:
-            enum_ctx = self._query_enumeration(
-                remoteName=self._fqdn, nmf=self._nmf, query=query,
-                attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap
-            )
+        
+        logging.debug(f"Starting pull: query='{query}', base_dn='{base_object_dn_for_soap}', attributes={len(attributes)}")
+        
+        try:
+            if use_schema:
+                enum_ctx = self._query_enumeration(
+                    remoteName=self._fqdn, nmf=self._nmf, query=query,
+                    attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap, use_schema=True
+                )
+            else:
+                enum_ctx = self._query_enumeration(
+                    remoteName=self._fqdn, nmf=self._nmf, query=query,
+                    attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap
+                )
+        except ADWSReferralError as e:
+            if not follow_referrals:
+                logging.warning(f"Referral detected but follow_referrals=False. Skipping.")
+                return None
+            
+            logging.info(f"Following referral to: {e.referral_dc}")
+            
+            # Create a new connection to the referred DC
+            try:
+                referred_client = ADWSConnect(
+                    fqdn=e.referral_dc,
+                    domain=self._domain,
+                    username=self._username,
+                    auth=self._auth,
+                    resource=self._resource
+                )
+                
+                logging.info(f"Successfully connected to referred DC: {e.referral_dc}")
+                
+                # Retry the pull on the referred DC (without following further referrals)
+                return referred_client.pull(
+                    query=query,
+                    attributes=attributes,
+                    print_incrementally=print_incrementally,
+                    base_object_dn_for_soap=base_object_dn_for_soap,
+                    use_schema=use_schema,
+                    follow_referrals=False  # Prevent infinite loops
+                )
+            except Exception as ref_error:
+                logging.error(f"Failed to connect to referred DC {e.referral_dc}: {ref_error}")
+                logging.warning("Falling back to original DC with empty results")
+                return None
+        
         if enum_ctx is None:
+            logging.error("Failed to get enumeration context")
             return None
-
+    
+        
+        logging.debug(f"Enumeration context obtained: {enum_ctx[:50]}...")
+        
         ElementTree.register_namespace("wsen", NAMESPACES["wsen"])
         aggregated_items_root = ElementTree.Element(f"{{{NAMESPACES['wsen']}}}Items")
-
+        
         more_results_expected = True
         batches_processed = 0
         total_items_in_all_batches = 0
+        consecutive_failures = 0
+        max_consecutive_failures = 3
 
         while more_results_expected:
             batches_processed += 1
-            logging.debug(f"Pulling batch {batches_processed} for context {enum_ctx[:20]}...")
+            logging.debug(f"Pulling batch {batches_processed}...")
 
             batch_xml_response_et, more_results_expected = self._pull_results(
                 remoteName=self._fqdn, nmf=self._nmf, enum_ctx=enum_ctx
             )
 
             if batch_xml_response_et is None:
-                logging.error(f"Error occurred while pulling batch {batches_processed}. Aborting pull for this context.")
-                break
+                consecutive_failures += 1
+                logging.error(f"Batch {batches_processed} failed (consecutive failures: {consecutive_failures})")
+                
+                if consecutive_failures >= max_consecutive_failures:
+                    logging.error(f"Aborting pull after {consecutive_failures} consecutive failures")
+                    break
+                continue
+            
+            # Reset counter on success
+            consecutive_failures = 0
 
             items_in_batch_container = batch_xml_response_et.find(".//wsen:Items", NAMESPACES)
 
@@ -473,7 +638,7 @@ class ADWSConnect:
                     current_batch_item_count += 1
                 total_items_in_all_batches += current_batch_item_count
 
-            logging.debug(f"Batch {batches_processed} contained {current_batch_item_count} items. More results expected: {more_results_expected}")
+            logging.debug(f"Batch {batches_processed}: {current_batch_item_count} items retrieved. More: {more_results_expected}")
 
             if print_incrementally and current_batch_item_count > 0 and items_in_batch_container is not None:
                 temp_root_for_print = ElementTree.Element("RootForPrint")
@@ -483,10 +648,10 @@ class ADWSConnect:
                 self._pretty_print_response(temp_root_for_print)
 
         if total_items_in_all_batches == 0:
-            logging.warning(f"Query '{query}' with base '{base_object_dn_for_soap or self._domain}' resulted in 0 objects collected overall.")
+            logging.warning(f"Query '{query}' returned 0 objects")
         else:
-            logging.debug(f"Finished pulling all batches for query '{query}'. Total items aggregated: {total_items_in_all_batches}")
-
+            #logging.info(f"Pull completed: {batches_processed} batches, {total_items_in_all_batches} total items")
+            pass
         return aggregated_items_root
 
     @classmethod
@@ -500,9 +665,11 @@ class ADWSConnect:
     @classmethod
     def create_client(cls, ip: str, domain: str, username: str, auth: NTLMAuth) -> Self:
         raise NotImplementedError()
+    
     @classmethod
     def accounts_cap_client(cls, ip: str, domain: str, username: str, auth: NTLMAuth) -> Self:
         raise NotImplementedError()
+    
     @classmethod
     def topology_cap_client(cls, ip: str, domain: str, username: str, auth: NTLMAuth) -> Self:
         raise NotImplementedError()
