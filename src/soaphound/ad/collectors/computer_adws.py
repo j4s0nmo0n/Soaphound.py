@@ -118,11 +118,11 @@ def collect_computers_adws(
             obj["objectClass"] = [oc]
         elif oc is None:
             obj["objectClass"] = []
-        # DN en string
+        # DN = string
         dn = ADUtils.get_entry_property(obj, "distinguishedName", default="")
         if isinstance(dn, list):
             obj["distinguishedName"] = dn[0] if dn else ""
-        # GUID en string upper
+        # GUID = string upper
         guid = ADUtils.get_entry_property(obj, "objectGUID")
         if isinstance(guid, bytes):
             try:
@@ -342,4 +342,3 @@ def format_computers_adws(
             "version": 6
         }
     }
-
