@@ -55,13 +55,13 @@ poetry install
 Perform ADWS collection with session enumerations 
 
 ```
-poetry run soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output
+poetry run soaphound -d <domain> -u <user> -p <password> -dc <dc-ip> --output-dir output
 ```
 
 Perform only ADWS collection
 
 ```
-poetry run soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output -c ADWSOnly
+poetry run soaphound -d <domain> -u <user> -p <password> -dc <dc-ip> --output-dir output -c ADWSOnly
 ```
 
 
@@ -74,3 +74,4 @@ poetry run soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --outpu
 - [ERNW](https://insinuator.net/2016/08/pentesting-webservices-with-net-tcp-binding/) for the initial boost.
 - [X-force Red](https://www.ibm.com/think/x-force/stealthy-enumeration-of-active-directory-environments-through-adws) for their brilliant implementation of NBFX and research insights.
 - [Rabobank red team](https://rabobank.jobs/en/techblog/adws-an-unconventional-path-into-active-directory-luc-kolen/) for sharing valuable resources and operational insights.
+
