@@ -5,6 +5,8 @@ We sought to follow a similar logic while implementing Soaphound.py, aiming to c
 
 The tool is currently being improved to cover all specific data collection scenarios. At the time of writing, it is capable of collecting Active Directory objects via the ADWS service and retrieving remote session data similar to what BloodHound.py achieves. Alternatively, it can operate in a mode restricted to collecting only AD objects through ADWS (using option -c ADWSOnly). 
 
+**We add improvements to the project, you can find it on [developpment branch](https://github.com/j4s0nmo0n/Soaphound.py/tree/development)**
+
 More informations: [you may check out the short blog post](https://j4s0nmo0n.github.io/belettetimoree.github.io/Soaphound.py%20-%20Collecting%20Active%20Directory%20Objects%20over%20ADWS%20from%20Linux.html)
 
 # Usage
