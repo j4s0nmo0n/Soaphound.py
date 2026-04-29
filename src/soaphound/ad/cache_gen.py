@@ -395,6 +395,7 @@ def create_and_combine_soaphound_cache(all_pulled_items, domain_root_dn, output_
     combined_output_path = os.path.join(output_dir, cache_filename)
     
     # Ensure directory exists before writing
+    output_dir = output_dir or "."
     os.makedirs(output_dir, exist_ok=True)
     
     logging.info(f"Initiating SOAPHound cache generation to {combined_output_path}...")
