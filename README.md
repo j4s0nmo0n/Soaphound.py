@@ -21,40 +21,44 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
                                                                                                     (made by @belettet1m0ree)
 
 
-usage: soaphound [-h] [-c COLLECTIONMETHOD] -d DOMAIN [--follow-referrals] [-v] [--ts] -u USERNAME [-p PASSWORD] [--hashes HASHES] -dc HOST [--zip] [-op PREFIX_NAME]
-                 [-wk NUM_WORKERS] [--output-dir OUTPUT_DIR]
-                                                                                     
+usage: soaphound [-h] [-c COLLECTIONMETHOD] -d DOMAIN [-v] [--ts] -u USERNAME [-p PASSWORD] [--hashes HASHES] -dc HOST [--zip] [-op PREFIX_NAME] [-wk NUM_WORKERS] [--output-dir OUTPUT_DIR] [--cert-find] [--cert-find-force-epa {auto,enabled,disabled}] [--cert-find-skip-web-probe] [--cert-find-ca-rpc]
+
 Python based ingestor for BloodHound using ADWS
-                                                                                     
-options:                                                                             
+
+options:
   -h, --help            show this help message and exit
-  -c COLLECTIONMETHOD, --collectionmethod COLLECTIONMETHOD
+  -c, --collectionmethod COLLECTIONMETHOD
                         Which information to collect : Default or ADWSOnly (no computer connections).
-  -d DOMAIN, --domain DOMAIN                                                                                                                                              
-                        Domain to query.                                             
-  --follow-referrals    Automatically follow AD referrals to parent domains (default: True)
+  -d, --domain DOMAIN   Domain to query.
   -v                    Enable verbose output.
   --ts                  Add timestamp to logs.
-                                          
-authentication options:         
-  NTLM is the only method supported at the moment.         
-                                          
-  -u USERNAME, --username USERNAME
+
+authentication options:
+  NTLM is the only method supported at the moment.
+
+  -u, --username USERNAME
                         Username. Format: username[@domain]; If the domain is unspecified, the current domain is used.
-  -p PASSWORD, --password PASSWORD
+  -p, --password PASSWORD
                         Password
   --hashes HASHES       LM:NLTM hashes
-                                          
-collection options:        
-  -dc HOST, --domain-controller HOST
+
+collection options:
+  -dc, --domain-controller HOST
                         DC to query (hostname)
   --zip                 Compress the JSON output files into a zip archive.
-  -op PREFIX_NAME, --outputprefix PREFIX_NAME
+  -op, --outputprefix PREFIX_NAME
                         String to prepend to output file names.
-  -wk NUM_WORKERS, --worker_num NUM_WORKERS        
+  -wk, --worker_num NUM_WORKERS
                         Number of workers, default 100
-  --output-dir OUTPUT_DIR                                                            
-                        Directory to write output files (default: output)
+  --output-dir OUTPUT_DIR
+                        Output folder (default .).
+  --cert-find           Enumerate AD CS certificate templates and CAs like certipy find.
+  --cert-find-force-epa {auto,enabled,disabled}
+                        Override HTTPS EPA detection for AD CS Web Enrollment: auto, enabled, or disabled.
+  --cert-find-skip-web-probe
+                        Do not probe HTTP/HTTPS /certsrv/ endpoints. AD CS Web Enrollment and ESC8 will not be evaluated.
+  --cert-find-ca-rpc    Enrich CA configuration through Remote Registry/RPC (User Specified SAN, Request Disposition, Enforce Encryption, Active Policy).
+
 ```
 
 # Installation
