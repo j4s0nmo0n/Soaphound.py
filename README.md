@@ -82,7 +82,10 @@ Perform only ADWS collection
 poetry run soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output -c ADWSOnly
 ```
 
-
+Perform ADCS information collect 
+```
+poetry run soaphound -d jjk.local  -u yuji -p SukunaIsAbitch -dc dc-curse --cert-find --cert-find-force-epa auto 
+```
 
 # References
 
