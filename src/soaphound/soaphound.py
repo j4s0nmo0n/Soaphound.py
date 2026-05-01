@@ -1,7 +1,7 @@
-import logging, sys, os, getpass, json, dns.resolver, datetime, time, zipfile
+import logging, sys, os, getpass, json, dns.resolver, datetime, time, zipfile, base64
 from soaphound.lib.cli import gen_cli_args
 from impacket.ldap.ldaptypes import LDAP_SID
-from soaphound.ad.adws import ADWSConnect, NTLMAuth
+from soaphound.ad.adws import ADWSConnect, NTLMAuth, KerberosAuth
 from soaphound.ad.cache_gen import (
     pull_all_ad_objects, adws_objecttype_guid_map, generate_caches,
     _generate_individual_caches, adws_object_classes, create_and_combine_soaphound_cache,
@@ -90,8 +90,52 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 
     lm = ''
     nt = ''
-    
-    if options.username is not None and options.password is not None:
+    aeskey = getattr(options, 'aes_key', None) or ''
+    kdc_host = getattr(options, 'kdc_ip', None) or options.domain_controller
+
+    # ------------------------------------------------------------------
+    # Selection du mode d'authentification (NTLM ou Kerberos)
+    # ------------------------------------------------------------------
+    if options.kerberos:
+        # Mode Kerberos: on s'appuie sur le cache KRB5CCNAME.
+        # Si le username est manquant, on l'extrait depuis le ccache.
+        logging.debug('Authentication: Kerberos (KRB5CCNAME)')
+
+        krb5cc = os.getenv('KRB5CCNAME')
+        if not krb5cc:
+            logging.warning("La variable KRB5CCNAME n'est pas définie. "
+                            "Vérifiez que vous avez bien chargé un ticket (ex: export KRB5CCNAME=/tmp/ticket.ccache).")
+        elif not os.path.isfile(krb5cc):
+            logging.warning("Le fichier ccache pointé par KRB5CCNAME est introuvable: %s", krb5cc)
+
+        # Si l'utilisateur ne fournit pas -u/-d, on les déduit du ccache.
+        if (not options.username) or (not options.domain):
+            try:
+                from impacket.krb5.ccache import CCache
+                ccache_domain, ccache_user, _, _ = CCache.parseFile(
+                    domain=options.domain or "",
+                    username=options.username or "",
+                    target=f"LDAP/{options.domain_controller}",
+                )
+                if not options.username and ccache_user:
+                    options.username = ccache_user
+                    logging.debug('Username extrait du ccache: %s', options.username)
+                if not options.domain and ccache_domain:
+                    options.domain = ccache_domain
+                    logging.debug('Domain extrait du ccache: %s', options.domain)
+            except Exception as e:
+                logging.debug("Impossible de parser le ccache: %s", e)
+
+        if not options.username:
+            logging.critical("Username introuvable: passez -u ou utilisez un ccache contenant un principal valide.")
+            sys.exit(1)
+        if not options.domain:
+            logging.critical("Domaine introuvable: passez -d ou utilisez un ccache contenant un principal valide.")
+            sys.exit(1)
+
+        auth = KerberosAuth(kdc_host=kdc_host)
+
+    elif options.username is not None and options.password is not None:
         logging.debug('Authentication: username/password')
         auth = NTLMAuth(password=options.password)
     elif options.username is not None and options.password is None and options.hashes is None:
@@ -100,11 +144,14 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         auth = NTLMAuth(password=options.password)
     elif options.hashes is not None and options.username is not None:
         logging.debug('Authentication: NT hash')
-        lm, nt = options.hashes.split(":")
+        if ':' in options.hashes:
+            lm, nt = options.hashes.split(":")
+        else:
+            lm, nt = '', options.hashes
         auth = NTLMAuth(password=None, hashes=nt)
     else:
         logging.debug('Failed to parse options')
-        parser.print_help()
+        logging.critical("Aucune méthode d'authentification valide. Utilisez -u/-p, --hashes, ou -k.")
         sys.exit(1)
 
     print(banner)
@@ -273,7 +320,32 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         
         computers_bh = format_computers_adws(computers, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map=objecttype_guid_map)
     else:
-        smb_auth = ADAuthentication(username=options.username, password=options.password, domain=options.domain, lm_hash=lm, nt_hash=nt, aeskey='', kdc=options.domain_controller)
+        # ------------------------------------------------------------------
+        # Configuration de l'authentification SMB/RPC (collecte de sessions)
+        # ------------------------------------------------------------------
+        if options.kerberos:
+            # En mode Kerberos, on charge le ticket depuis le ccache (KRB5CCNAME)
+            # afin que les connexions SMB/RPC utilisent ce TGT.
+            smb_auth = ADAuthentication(
+                username=options.username,
+                password='',
+                domain=options.domain,
+                lm_hash='',
+                nt_hash='',
+                aeskey=aeskey,
+                kdc=kdc_host,
+                auth_method='kerberos',
+            )
+            try:
+                if not smb_auth.load_ccache():
+                    logging.warning("Impossible de charger un TGT depuis le ccache. "
+                                    "La collecte de sessions SMB risque d'échouer. "
+                                    "Vérifiez KRB5CCNAME et la validité du ticket.")
+            except Exception as e:
+                logging.warning("Erreur lors du chargement du ccache: %s", e)
+        else:
+            smb_auth = ADAuthentication(username=options.username, password=options.password, domain=options.domain, lm_hash=lm, nt_hash=nt, aeskey=aeskey, kdc=options.domain_controller)
+
         addomain = ADDomain(
             name=options.domain,
             netbios_name=None,

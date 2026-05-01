@@ -26,8 +26,8 @@ def gen_cli_args():
     parser.add_argument('-d',
                         '--domain',
                         action='store',
-                        required=True,
-                        help='Domain to query.')
+                        required=False,
+                        help='Domain to query (extrait du ccache en mode -k si non fourni).')
     parser.add_argument('-v',
                         action='store_true',
                         help='Enable verbose output.')
@@ -35,13 +35,13 @@ def gen_cli_args():
     parser.add_argument("--ts", action="store_true", help="Add timestamp to logs.")
 
 
-    helptext = 'NTLM is the only method supported at the moment.'
+    helptext = 'NTLM (utilisateur/mot de passe ou hash NT) ou Kerberos (-k via KRB5CCNAME).'
 
     auopts = parser.add_argument_group('authentication options', description=helptext)
     auopts.add_argument('-u',
                         '--username',
                         action='store',
-                        required=True,
+                        required=False,
                         help='Username. Format: username[@domain]; If the domain is unspecified, the current domain is used.')
     auopts.add_argument('-p',
                         '--password',
@@ -50,6 +50,20 @@ def gen_cli_args():
     auopts.add_argument('--hashes',
                         action='store',
                         help='LM:NLTM hashes')
+    auopts.add_argument('-k',
+                        '--kerberos',
+                        action='store_true',
+                        help='Authentification Kerberos via le ticket présent dans le ccache pointé par KRB5CCNAME.')
+    auopts.add_argument('-aesKey',
+                        '--aes-key',
+                        action='store',
+                        metavar='HEXKEY',
+                        help='Clé AES (128/256 bits) pour l\'authentification Kerberos (utilisée pour la collecte SMB en mode Default).')
+    auopts.add_argument('-dc-ip',
+                        '--kdc-ip',
+                        action='store',
+                        metavar='HOST',
+                        help='IP/hôte du KDC. Utile lorsque le DC ADWS et le KDC diffèrent (par défaut: valeur de -dc).')
 
     coopts = parser.add_argument_group('collection options')
 

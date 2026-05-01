@@ -170,8 +170,19 @@ class NTLMAuth(ADWSAuthType):
         self.nt = hashes if hashes else None
         self.password = password
 
+class KerberosAuth(ADWSAuthType):
+    """
+    Authentification Kerberos via le cache d'identifiants KRB5CCNAME.
+    Le ticket (TGT ou TGS LDAP) doit être présent dans le ccache pointé par
+    la variable d'environnement KRB5CCNAME.
+    """
+    def __init__(self, kdc_host: str | None = None):
+        # Hôte du KDC à interroger pour demander un TGS LDAP si seul un TGT
+        # est présent dans le cache. Si None, on retombe sur le FQDN cible.
+        self.kdc_host = kdc_host
+
 class ADWSConnect:
-    def __init__(self, fqdn: str, domain: str, username: str, auth: NTLMAuth, resource: str ):
+    def __init__(self, fqdn: str, domain: str, username: str, auth: ADWSAuthType, resource: str ):
         self._fqdn = fqdn
         self._domain = domain
         self._username = username
@@ -180,9 +191,20 @@ class ADWSConnect:
         self._nmf: ms_nmf.NMFConnection = self._connect(self._fqdn, self._resource)
 
     def _create_NNS_from_auth(self, sock: socket.socket) -> NNS:
+        # Authentification NTLM (mot de passe ou hash NT)
         if isinstance(self._auth, NTLMAuth):
             return NNS(socket=sock, fqdn=self._fqdn, domain=self._domain, username=self._username,
                        password=self._auth.password, nt=self._auth.nt if self._auth.nt else "")
+        # Authentification Kerberos via ccache (KRB5CCNAME)
+        if isinstance(self._auth, KerberosAuth):
+            return NNS(
+                socket=sock,
+                fqdn=self._fqdn,
+                domain=self._domain,
+                username=self._username,
+                auth_protocol="kerberos",
+                kdc_host=self._auth.kdc_host,
+            )
         raise NotImplementedError("Authentication type not supported")
 
     def _connect(self, remoteName: str, resource: str) -> ms_nmf.NMFConnection:
@@ -655,21 +677,21 @@ class ADWSConnect:
         return aggregated_items_root
 
     @classmethod
-    def pull_client(cls, ip: str, domain: str, username: str, auth: NTLMAuth) -> Self:
+    def pull_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:
         return cls(ip, domain, username, auth, "Enumeration")
 
     @classmethod
-    def put_client(cls, ip: str, domain: str, username: str, auth: NTLMAuth) -> Self:
+    def put_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:
         return cls(ip, domain, username, auth, "Resource")
 
     @classmethod
-    def create_client(cls, ip: str, domain: str, username: str, auth: NTLMAuth) -> Self:
+    def create_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:
         raise NotImplementedError()
     
     @classmethod
-    def accounts_cap_client(cls, ip: str, domain: str, username: str, auth: NTLMAuth) -> Self:
+    def accounts_cap_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:
         raise NotImplementedError()
     
     @classmethod
-    def topology_cap_client(cls, ip: str, domain: str, username: str, auth: NTLMAuth) -> Self:
+    def topology_cap_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:
         raise NotImplementedError()

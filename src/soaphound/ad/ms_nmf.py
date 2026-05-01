@@ -205,8 +205,8 @@ class NMFVia(NMFRecord):
         impacket.structure.Structure.__init__(self)
         if data:
             self["record_type"] = data[0]
-            _, _, payload = self.decode_size(data[1:])
-            self["via"] = payload.decode("utf-8")
+            size, _, payload = self.decode_size(data[1:])
+            self["via"] = payload[:size].decode("utf-8")
         else:
             self["record_type"] = RecordType.VIA
             self["via_len"] = self.encode_size(len(via.encode("utf-8")))
@@ -248,8 +248,8 @@ class NMFSizedEnvelope(NMFRecord):
         impacket.structure.Structure.__init__(self, data=data)
         if data:
             self["record_type"] = data[0]
-            _, _, env_payload = self.decode_size(data[1:])
-            self["payload"] = env_payload
+            size, _, env_payload = self.decode_size(data[1:])
+            self["payload"] = env_payload[:size]
         else:
             self["record_type"] = RecordType.SIZED_ENVELOPE
             self["size"] = self.encode_size(len(payload))
@@ -287,8 +287,8 @@ class NMFFault(NMFRecord):
         impacket.structure.Structure.__init__(self, data=data)
         if data:
             self["record_type"] = data[0]
-            _, _, payload = self.decode_size(data[1:])
-            self["fault"] = payload.decode("utf-8")
+            size, _, payload = self.decode_size(data[1:])
+            self["fault"] = payload[:size].decode("utf-8")
 
         else:
             self["record_type"] = RecordType.FAULT
@@ -317,8 +317,8 @@ class NMFUpgradeRequest(NMFRecord):
 
         if data:
             self["record_type"] = data[0]
-            _, _, payload = self.decode_size(data[1:])
-            self["proto"] = payload.decode("utf-8")
+            size, _, payload = self.decode_size(data[1:])
+            self["proto"] = payload[:size].decode("utf-8")
         else:
             self["record_type"] = RecordType.UPGRADE_REQUEST
             self["proto_len"] = self.encode_size(len(proto.encode("utf-8")))
@@ -399,6 +399,75 @@ class NMFConnection:
         self._fqdn = fqdn
 
         self._encoder = Encoder(self._encoding)
+        self._recv_buffer = b""
+
+    @staticmethod
+    def _decode_size_from_buffer(encoded_data: bytes) -> tuple[int, int] | None:
+        """Decode a variable-length size field if enough bytes are buffered."""
+
+        size = 0
+        shift = 0
+
+        for i, byte in enumerate(encoded_data[:5], start=1):
+            size |= (byte & 0x7F) << shift
+            if not (byte & 0x80):
+                return size, i
+            shift += 7
+
+        if len(encoded_data) < 5:
+            return None
+
+        raise ValueError("Size too big")
+
+    def _recv_more(self) -> None:
+        data = self._transport.recv(4096)
+        if not data:
+            raise ConnectionError("Connection closed while reading NMF record")
+        self._recv_buffer += data
+
+    def _recv_record_bytes(self) -> bytes:
+        fixed_record_sizes = {
+            RecordType.VERSION: 3,
+            RecordType.MODE: 2,
+            RecordType.KNOWN_ENCODING: 2,
+            RecordType.END: 1,
+            RecordType.UPGRADE_RESPONSE: 1,
+            RecordType.PREAMBLE_ACK: 1,
+            RecordType.PREAMBLE_END: 1,
+        }
+        variable_record_types = {
+            RecordType.VIA,
+            RecordType.SIZED_ENVELOPE,
+            RecordType.FAULT,
+            RecordType.UPGRADE_REQUEST,
+        }
+
+        while not self._recv_buffer:
+            self._recv_more()
+
+        record_type = self._recv_buffer[0]
+
+        if record_type in fixed_record_sizes:
+            total_size = fixed_record_sizes[record_type]
+            while len(self._recv_buffer) < total_size:
+                self._recv_more()
+        elif record_type in variable_record_types:
+            size_info = None
+            while size_info is None:
+                size_info = self._decode_size_from_buffer(self._recv_buffer[1:])
+                if size_info is None:
+                    self._recv_more()
+
+            payload_size, size_len = size_info
+            total_size = 1 + size_len + payload_size
+            while len(self._recv_buffer) < total_size:
+                self._recv_more()
+        else:
+            total_size = 1
+
+        record = self._recv_buffer[:total_size]
+        self._recv_buffer = self._recv_buffer[total_size:]
+        return record
 
     def _throw_if_not(self, expected: Type[NMFRecord], got: NMFRecord):
         """Allows for quick validation of expected responses.  If not expected
@@ -431,7 +500,9 @@ class NMFConnection:
         self._throw_if_not(NMFUpgradeResponse, self._recv())
 
         # nns auth
-        self._nns.auth_ntlm()
+        self._nns.auth()
+
+        self._recv_buffer = b""
 
         # switch to upgraded transport now
         self._transport = self._nns
@@ -523,7 +594,7 @@ class NMFConnection:
             0xC: NMFPreambleEnd,
         }
 
-        data: bytes = self._transport.recv(4096)
+        data = self._recv_record_bytes()
 
         record_type: int = data[0]
 

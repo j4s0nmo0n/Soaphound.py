@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import logging
 import unicodedata
 from uuid import UUID
-from soaphound.ad.adws import ADWSConnect, NTLMAuth
+from soaphound.ad.adws import ADWSConnect, NTLMAuth, KerberosAuth, ADWSAuthType
 from soaphound.ad.soap_templates import NAMESPACES
 from base64 import b64decode, b64encode
 from impacket.ldap.ldaptypes import LDAP_SID
@@ -84,7 +84,7 @@ def generate_caches(all_objects):
 
     return value_to_id_cache, id_to_type_cache
 
-def pull_all_ad_objects(ip: str, domain: str, username: str, auth: NTLMAuth, query: str, attributes: list, base_dn_override: str = None):
+def pull_all_ad_objects(ip: str, domain: str, username: str, auth: ADWSAuthType, query: str, attributes: list, base_dn_override: str = None):
     """
     Pulls all AD objects using ADWS for the given query and attributes.
     Always provide defaultNamingContext (real base DN) via base_dn_override.
