@@ -1,79 +1,173 @@
 # Description
-While reading [Bloodhound.py](https://github.com/dirkjanm/BloodHound.py), a Linux alternative to [Sharphound](https://github.com/SpecterOps/SharpHound), we observed that object collection is performed on a case-by-case basis. Specific conditions are evaluated to determine the most relevant information for each collected object, and tailored actions are taken accordingly.
 
-We sought to follow a similar logic while implementing Soaphound.py, aiming to collect the most valuable information during object enumeration through ADWS. In addition, as users' session on machines are not collected throught LDAP, we reused Bloodhound.py way to perform this collect. 
+While reading [BloodHound.py](https://github.com/dirkjanm/BloodHound.py), a Linux alternative to [SharpHound](https://github.com/SpecterOps/SharpHound), we observed that object collection is performed on a case-by-case basis. Specific conditions are evaluated to determine the most relevant information for each collected object, and tailored actions are taken accordingly.
 
-The tool is currently being improved to cover all specific data collection scenarios. At the time of writing, it is capable of collecting Active Directory objects via the ADWS service and retrieving remote session data similar to what BloodHound.py achieves. Alternatively, it can operate in a mode restricted to collecting only AD objects through ADWS (using option -c ADWSOnly). 
+We sought to follow a similar logic while implementing Soaphound.py, aiming to collect the most valuable information during object enumeration through ADWS. In addition, since user sessions on machines are not collected through LDAP, we reused BloodHound.py's approach to perform this collection.
 
-**We add improvements to the project, you can find it on [developpment branch](https://github.com/j4s0nmo0n/Soaphound.py/tree/development)**
+The tool is currently being improved to cover all specific data collection scenarios. At the time of writing, it is capable of collecting Active Directory objects via the ADWS service and retrieving remote session data similar to what BloodHound.py achieves. Alternatively, it can operate in a mode restricted to collecting only AD objects through ADWS using the `-c ADWSOnly` option.
 
-More informations: [you may check out the short blog post](https://j4s0nmo0n.github.io/belettetimoree.github.io/Soaphound.py%20-%20Collecting%20Active%20Directory%20Objects%20over%20ADWS%20from%20Linux.html)
+More information: [you may check out the short blog post](https://j4s0nmo0n.github.io/belettetimoree.github.io/Soaphound.py%20-%20Collecting%20Active%20Directory%20Objects%20over%20ADWS%20from%20Linux.html)
 
 # Usage
 ```
-usage: soaphound [-h] [-c COLLECTIONMETHOD] -d DOMAIN [-v] [--ts] -u USERNAME [-p PASSWORD] [--hashes HASHES] -dc HOST [--zip] [-op PREFIX_NAME] [-wk NUM_WORKERS] [--output-dir OUTPUT_DIR]
+ .oooooo..o                                oooo                                                .o8                             
+d8P'    `Y8                                `888                                               "888                             
+Y88bo.       .ooooo.   .oooo.   oo.ooooo.   888 .oo.    .ooooo.  oooo  oooo  ooo. .oo.    .oooo888      oo.ooooo.  oooo    ooo 
+ `"Y8888o.  d88' `88b `P  )88b   888' `88b  888P"Y88b  d88' `88b `888  `888  `888P"Y88b  d88' `888       888' `88b  `88.  .8'  
+     `"Y88b 888   888  .oP"888   888   888  888   888  888   888  888   888   888   888  888   888       888   888   `88..8'   
+oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   888   888  888   888  .o.  888   888    `888'    
+8""88888P'  `Y8bod8P' `Y888""8o  888bod8P' o888o o888o `Y8bod8P'  `V88V"V8P' o888o o888o `Y8bod88P" Y8P  888bod8P'     .8'     
+                                 888                                                                     888       .o..P'      
+                                o888o                                                                   o888o      `Y8P'       
+                                                                                                    (made by @belettet1m0ree)
+
+
+usage: soaphound [-h] [-c COLLECTIONMETHOD] -d DOMAIN [-v] [--ts] -u USERNAME
+                 [-p PASSWORD] [--hashes HASHES] [-k] [-aesKey HEXKEY]
+                 [-dc-ip HOST] -dc HOST [--zip] [-op PREFIX_NAME]
+                 [-wk NUM_WORKERS] [--output-dir OUTPUT_DIR]
+                 [--cert-find] [--cert-find-force-epa {auto,enabled,disabled}]
+                 [--cert-find-skip-web-probe] [--cert-find-ca-rpc]
 
 Python based ingestor for BloodHound using ADWS
 
 options:
   -h, --help            show this help message and exit
-  -c COLLECTIONMETHOD, --collectionmethod COLLECTIONMETHOD
-                        Which information to collect : Default or ADWSOnly (no computer connections).
-  -d DOMAIN, --domain DOMAIN
-                        Domain to query.
+  -c, --collectionmethod COLLECTIONMETHOD
+                        Which information to collect: Default or ADWSOnly
+                        (no computer connections).
+  -d, --domain DOMAIN   Domain to query.
   -v                    Enable verbose output.
   --ts                  Add timestamp to logs.
 
 authentication options:
-  NTLM is the only method supported at the moment.
+  NTLM authentication is supported using a username/password or NT hash.
+  Kerberos authentication is supported through -k using the ccache pointed to
+  by KRB5CCNAME.
 
-  -u USERNAME, --username USERNAME
-                        Username. Format: username[@domain]; If the domain is unspecified, the current domain is used.
-  -p PASSWORD, --password PASSWORD
-                        Password
-  --hashes HASHES       LM:NLTM hashes
+  -u, --username USERNAME
+                        Username. Format: username[@domain].
+                        If the domain is unspecified, the current domain is used.
+  -p, --password PASSWORD
+                        Password.
+  --hashes HASHES       LM:NTLM hashes.
+  -k, --kerberos        Use Kerberos authentication through the ticket available
+                        in the ccache pointed to by KRB5CCNAME.
+  -aesKey, --aes-key HEXKEY
+                        AES key, 128 or 256 bits, for Kerberos authentication.
+                        Used for SMB collection in Default mode.
+  -dc-ip, --kdc-ip HOST
+                        KDC IP address or hostname. Useful when the ADWS DC and
+                        the KDC differ. Defaults to the value provided with -dc.
 
 collection options:
-  -dc HOST, --domain-controller HOST
-                        DC to query (hostname)
+  -dc, --domain-controller HOST
+                        DC to query, hostname or FQDN.
   --zip                 Compress the JSON output files into a zip archive.
-  -op PREFIX_NAME, --outputprefix PREFIX_NAME
+  -op, --outputprefix PREFIX_NAME
                         String to prepend to output file names.
-  -wk NUM_WORKERS, --worker_num NUM_WORKERS
-                        Number of workers, default 100
+  -wk, --worker_num NUM_WORKERS
+                        Number of workers, default 100.
   --output-dir OUTPUT_DIR
-                        Output folder (default .).
+                        Output folder, default current directory.
+  --cert-find           Enumerate AD CS certificate templates and CAs like certipy find.
+  --cert-find-force-epa {auto,enabled,disabled}
+                        Override HTTPS EPA detection for AD CS Web Enrollment: auto, enabled, or disabled.
+  --cert-find-skip-web-probe
+                        Do not probe HTTP/HTTPS /certsrv/ endpoints AD CS Web Enrollment and ESC8 will not be evaluated.
+  --cert-find-ca-rpc    Enrich CA configuration through Remote Registry/RPC:
+                        User Specified SAN, Request Disposition, Enforce
+                        Encryption, Active Policy.
+
 ```
 
 # Installation
-With `poetry`
 
+## With `pipx` (recommended)
+
+```bash
+pipx install git+https://github.com/j4s0nmo0n/Soaphound.py
+soaphound --help
 ```
+
+With Shadow Credentials support (optional `dsinternals` dependency):
+
+```bash
+pipx install "soaphound[shadowcred] @ git+https://github.com/j4s0nmo0n/Soaphound.py"
+```
+
+To upgrade later:
+
+```bash
+pipx upgrade soaphound
+```
+
+## With `poetry` (development)
+
+```bash
+git clone https://github.com/j4s0nmo0n/Soaphound.py
+cd Soaphound.py
 poetry install
+poetry run soaphound --help
+```
+
+## With `pip` in a virtualenv
+
+```bash
+python3 -m venv ~/venvs/soaphound
+source ~/venvs/soaphound/bin/activate
+pip install git+https://github.com/j4s0nmo0n/Soaphound.py
 ```
 
 # Example Usage
 
-Perform ADWS collection with session enumerations 
+Perform ADWS collection with session enumeration
 
 ```
-poetry run soaphound -d <domain> -u <user> -p <password> -dc <dc-ip> --output-dir output
+soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output
 ```
 
-Perform only ADWS collection
+Perform ADWS-only collection (no SMB session enumeration)
 
 ```
-poetry run soaphound -d <domain> -u <user> -p <password> -dc <dc-ip> --output-dir output -c ADWSOnly
+soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output -c ADWSOnly
 ```
 
+Perform ADCS information collection
 
+```
+soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --cert-find --cert-find-force-epa auto
+```
+
+# Kerberos authentication (-k)
+
+Soaphound supports Kerberos authentication through the `-k` option and the `KRB5CCNAME` environment variable.
+
+The ccache may contain a valid TGT or a usable service ticket, depending on the collection mode and the operations being performed.
+
+```bash
+# Load a Kerberos ticket
+export KRB5CCNAME=/tmp/yuji.ccache
+
+# Run Soaphound with Kerberos
+soaphound -d jjk.local -u yuji -dc dc-curse.jjk.local -k
+
+# Run ADWS-only collection with Kerberos
+soaphound -d jjk.local -u yuji -dc dc-curse.jjk.local -k -c ADWSOnly
+
+# Let Soaphound extract the username and domain from the ccache
+soaphound -dc dc-curse.jjk.local -k -c ADWSOnly
+
+# Use a different KDC
+soaphound -d jjk.local -u yuji -dc adws.jjk.local -dc-ip kdc.jjk.local -k
+```
 
 # References
 
 - [Falcon Force Team](https://falconforce.nl/soaphound-tool-to-collect-active-directory-data-via-adws/) for the initial inspiration.
-- [Bloodhound.py](https://github.com/dirkjanm/BloodHound.py), for this amazing implementation of Bloodhound ingestor.
-- [Microsoft](https://learn.microsoft.com/en-us/openspecs/windows_psrotocols/ms-addm/59205cf6-aa8e-4f7e-be57-8b63640bf9a4) for the official protocol documentation.
+- [BloodHound.py](https://github.com/dirkjanm/BloodHound.py), for this amazing implementation of BloodHound ingestor.
+- [SOAPy](https://github.com/jlevere/SOAPy) by @_logangoins, whose Kerberos NNS implementation is the basis of the `-k` support.
+- [Microsoft](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-addm/59205cf6-aa8e-4f7e-be57-8b63640bf9a4) for the official protocol documentation.
 - [ERNW](https://insinuator.net/2016/08/pentesting-webservices-with-net-tcp-binding/) for the initial boost.
-- [X-force Red](https://www.ibm.com/think/x-force/stealthy-enumeration-of-active-directory-environments-through-adws) for their brilliant implementation of NBFX and research insights.
-- [Rabobank red team](https://rabobank.jobs/en/techblog/adws-an-unconventional-path-into-active-directory-luc-kolen/) for sharing valuable resources and operational insights.
-
+- [X-Force Red](https://www.ibm.com/think/x-force/stealthy-enumeration-of-active-directory-environments-through-adws) for their brilliant implementation of NBFX and research insights.
+- [Rabobank Red Team](https://rabobank.jobs/en/techblog/adws-an-unconventional-path-into-active-directory-luc-kolen/) for sharing valuable resources and operational insights.
