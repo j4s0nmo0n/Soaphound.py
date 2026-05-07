@@ -38,7 +38,12 @@ EXTRIGHTS_GUID_MAPPING = {
     "UserForceChangePassword": string_to_bin("00299570-246d-11d0-a768-00aa006e0529"),
     "AllowedToAct": string_to_bin("3f78c3e5-f79a-46bd-a0b8-9d18116ddc79"),
     "UserAccountRestrictionsSet": string_to_bin("4c164200-20c0-11d0-a768-00aa006e0529"),
-    "WriteGPLink": string_to_bin("f30e3bbf-9ff0-11d1-b603-0000f80367c1")
+    # WriteGPLink GUID: f30e3bbe (NOT f30e3bbf). The official MS-ADTS rightsGUID for
+    # the GP-Link control access right ends in -bbe. A previous typo in this file used
+    # -bbf, which silently dropped every WriteGPLink edge during ACE parsing
+    # (binary comparison: a single-bit difference in the GUID prevents any match).
+    # Reference: bloodhound.py (dirkjanm) + MS-ADTS section 5.1.3.2.1.
+    "WriteGPLink": string_to_bin("f30e3bbe-9ff0-11d1-b603-0000f80367c1")
 }
 
 def parse_security_descriptor(sd_bytes):
@@ -195,7 +200,12 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
                 if entrytype == 'computer' and can_write_property(ace_object, EXTRIGHTS_GUID_MAPPING['AllowedToAct']):
                     relations.append(build_relation(sid, 'AddAllowedToAct', '', inherited=is_inherited))
                 # Property set, but ignore Domain Admins since they already have enough privileges anyway
-                if entrytype == 'computer' and can_write_property(ace_object, EXTRIGHTS_GUID_MAPPING['UserAccountRestrictionsSet']) and not sid.endswith('-512'):
+                # Property set, but ignore Domain Admins since they already have enough privileges anyway
+                # Aligned on bloodhound.py: applies to both computer and user entries.
+                # Missing on user previously meant WriteAccountRestrictions edges were
+                # silently dropped on user accounts (impact: missed UAC-flag-flip paths,
+                # incl. ASREP roasting setup).
+                if entrytype in ['computer', 'user'] and can_write_property(ace_object, EXTRIGHTS_GUID_MAPPING['UserAccountRestrictionsSet']) and not sid.endswith('-512'):
                     relations.append(build_relation(sid, 'WriteAccountRestrictions', '', inherited=is_inherited))
                 if entrytype in ['ou', 'organizational-unit'] and can_write_property(ace_object, EXTRIGHTS_GUID_MAPPING['WriteGPLink']):
                     relations.append(build_relation(sid, 'WriteGPLink', '', inherited=is_inherited))
@@ -220,18 +230,27 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
                     relations.append(build_relation(sid, 'AddSelf', '', inherited=is_inherited))
 
             # Property read privileges
+            # LAPS GUIDs - alignment with bloodhound.py covers all three variants:
+            # - ms-Mcs-AdmPwd            : LAPS v1 (legacy)
+            # - ms-LAPS-Password         : LAPS v2 plain (Windows LAPS, unencrypted mode)
+            # - ms-LAPS-EncryptedPassword: LAPS v2 encrypted
+            # Missing ms-laps-password previously meant the ReadLAPSPassword edge was
+            # silently dropped on domains running Windows LAPS in unencrypted mode.
             laps_v1_guid = get_guid('ms-mcs-admpwd')
+            laps_v2_plain_guid = get_guid('mslaps-password')
             laps_v2_guid = get_guid('mslaps-encryptedpassword')
             object_type_guid = ace_object.acedata.get_object_type()
             if object_type_guid:
                 object_type_guid = object_type_guid.lower().strip()
             if laps_v1_guid:
                 laps_v1_guid = laps_v1_guid.lower().strip()
+            if laps_v2_plain_guid:
+                laps_v2_plain_guid = laps_v2_plain_guid.lower().strip()
             if laps_v2_guid:
                 laps_v2_guid = laps_v2_guid.lower().strip()
             if ace_object.acedata.mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_READ_PROP):
                 if entrytype == 'computer' and ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT):
-                    if object_type_guid in filter(None, [laps_v1_guid, laps_v2_guid]):
+                    if object_type_guid in filter(None, [laps_v1_guid, laps_v2_plain_guid, laps_v2_guid]):
                         relations.append(build_relation(sid, 'ReadLAPSPassword', inherited=is_inherited))
                        # print("[DEBUG LAPS ACE MATCH]", object_type_guid)
             
@@ -251,7 +270,11 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
                     relations.append(build_relation(sid, 'GetChangesAll', '', inherited=is_inherited))
                 if entrytype == 'domain' and has_extended_right(ace_object, EXTRIGHTS_GUID_MAPPING['GetChangesInFilteredSet']):
                     relations.append(build_relation(sid, 'GetChangesInFilteredSet', '', inherited=is_inherited))
-                if entrytype == 'user' and has_extended_right(ace_object, EXTRIGHTS_GUID_MAPPING['UserForceChangePassword']):
+                # Aligned on bloodhound.py: applies to both user and computer entries.
+                # Trade-off note: machine account passwords rotate every ~30 days, so
+                # this edge has limited offensive value on computer accounts in practice,
+                # but bloodhound.py exposes it consistently for graph completeness.
+                if entrytype in ['user', 'computer'] and has_extended_right(ace_object, EXTRIGHTS_GUID_MAPPING['UserForceChangePassword']):
                     relations.append(build_relation(sid, 'ForceChangePassword', '', inherited=is_inherited))
 
         if ace_object.ace.AceType == 0x00:

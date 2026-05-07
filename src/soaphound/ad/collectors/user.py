@@ -202,6 +202,28 @@ def format_users(
             user_sid,
             "User", object_type_guid_map=objecttype_guid_map
         )
+
+        # gMSA: parse the msDS-GroupMSAMembership SD to expose ReadGMSAPassword
+        # edges in BloodHound. This attribute holds a security descriptor whose
+        # DACL controls who is allowed to retrieve the gMSA's managed password.
+        # bloodhound.py does the equivalent in parse_gmsa() (memberships.py:720).
+        # Without this, every gMSA in the graph is missing its ReadGMSAPassword
+        # edges, breaking gMSA compromise paths.
+        gmsa_sd = obj.get("msDS-GroupMSAMembership")
+        if gmsa_sd:
+            gmsa_aces, _ = _parse_aces(
+                gmsa_sd,
+                id_to_type_cache,
+                user_sid,
+                "User", object_type_guid_map=objecttype_guid_map,
+            )
+            for ace in gmsa_aces:
+                # Owner relations on the gMSA SD are not meaningful here
+                if ace.get("RightName") == "Owner":
+                    continue
+                ace["RightName"] = "ReadGMSAPassword"
+                aces_user.append(ace)
+
         aces_user = dedupe_aces(aces_user)
         for ace in aces_user:
             ace["PrincipalSID"] = prefix_well_known_sid(ace["PrincipalSID"], domain, domain_sid)
