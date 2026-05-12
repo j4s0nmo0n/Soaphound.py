@@ -61,7 +61,7 @@ def prefix_well_known_sid(sid: str, domain_name: str, domain_sid: str, well_know
 def get_child_objects_adws(parent_dn, data_child_main):
     """
     Retourne tous les enfants directs d'un objet AD (domaine/container/OU) selon la DN, pour ADWS.
-    Privilégie l'ObjectSID quand il existe, sinon fallback sur l'ObjectGUID.
+    Prefers ObjectSID when available, falls back to ObjectGUID otherwise.
     """
     parent_dn_upper = parent_dn.upper()
     children = []
@@ -74,23 +74,23 @@ def get_child_objects_adws(parent_dn, data_child_main):
             continue
         dn_child_upper = dn_child.upper()
 
-        # Vérifie si c'est un enfant direct (niveau hiérarchique +1)
+        # Check if it's a direct child (hierarchy level +1)
         if dn_child_upper.endswith("," + parent_dn_upper) and \
            dn_child_upper.count(",") == parent_dn_upper.count(",") + 1:
 
-            # Détection du type
+            # Detect the type
             obj_type = obj_classes[0] if isinstance(obj_classes, list) and obj_classes else obj_classes or "Unknown"
             if obj_type.lower() == "top" and isinstance(obj_classes, list) and len(obj_classes) > 1:
                 obj_type = obj_classes[1]
 
-            # Privilégier le SID si dispo
+            # Prefer the SID when available
             object_id = None
             if isinstance(sid_child, bytes):
                 object_id = LDAP_SID(sid_child).formatCanonical()
             elif isinstance(sid_child, str) and sid_child.upper().startswith("S-1-"):
                 object_id = sid_child.upper()
 
-            # Sinon fallback GUID
+            # Otherwise fall back to GUID
             if not object_id and guid_child:
                 object_id = str(UUID(bytes_le=guid_child)) if isinstance(guid_child, bytes) else guid_child
 

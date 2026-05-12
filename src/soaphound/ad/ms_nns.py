@@ -24,12 +24,12 @@ from impacket.krb5.gssapi import (
     KRB5_AP_REQ,
     CheckSumField,
 )
-# Constantes RFC 4121 utilisées par notre fallback GSS_Wrap_LDAP / GSS_Unwrap_LDAP
-# pour les versions d'impacket antérieures à 0.13 qui n'exposent pas ces méthodes.
+# RFC 4121 constants used by our GSS_Wrap_LDAP / GSS_Unwrap_LDAP fallback
+# for impacket versions older than 0.13 that do not expose these methods.
 try:
     from impacket.krb5.gssapi import KG_USAGE_INITIATOR_SEAL, KG_USAGE_ACCEPTOR_SEAL
 except ImportError:
-    # valeurs RFC 4121 si jamais elles ne sont pas exposées
+    # RFC 4121 values in case they are not exposed by impacket
     KG_USAGE_INITIATOR_SEAL = 24
     KG_USAGE_ACCEPTOR_SEAL = 22
 from impacket.krb5.kerberosv5 import getKerberosTGS
@@ -43,21 +43,21 @@ KRB5_AP_REP = b"\x02\x00"
 
 
 # ---------------------------------------------------------------------------
-# Fallback de compatibilité pour les versions d'impacket sans GSS_Wrap_LDAP
+# Compatibility fallback for impacket versions without GSS_Wrap_LDAP
 # ---------------------------------------------------------------------------
-# Les méthodes GSSAPI_AES{128,256}.GSS_Wrap_LDAP et GSS_Unwrap_LDAP n'ont été
-# ajoutées à impacket qu'à partir de la version 0.13. Sur les versions plus
-# anciennes (0.11/0.12, encore présentes sur Parrot OS, Kali stable, etc.) on
-# implémente la même logique ici à partir des primitives disponibles dans
+# The GSSAPI_AES{128,256}.GSS_Wrap_LDAP and GSS_Unwrap_LDAP methods were only
+# added to impacket starting in version 0.13. On older versions (0.11/0.12,
+# still shipped on Parrot OS, Kali stable, etc.) we re-implement the same
+# logic here using the primitives available in impacket and pycryptodomex.
 # toutes les versions: WRAP(), cipherType(), rotate(), unrotate().
-# RFC 4121 §4.2.6.2: l'AP-REP côté KDC fournit la sub-key, le RRC vaut 28
-# quand le chiffrement est demandé.
+# RFC 4121 §4.2.6.2: the AP-REP from the KDC provides the sub-key, RRC is 28
+# when encryption is requested.
 
 def _gss_wrap_ldap_aes_compat(gss, sessionKey, data, sequenceNumber):
     """Equivalent de GSSAPI_AES.GSS_Wrap_LDAP pour impacket < 0.13.
 
-    Retourne (cipherText, header) où header est le WRAP token RFC 4121
-    et cipherText l'intégralité des données chiffrées+rotation.
+    Returns (cipherText, header) where header is the RFC 4121 WRAP token
+    and cipherText the full encrypted+rotated payload.
     """
     token = gss.WRAP()
     cipher = gss.cipherType()

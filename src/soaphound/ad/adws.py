@@ -173,12 +173,12 @@ class NTLMAuth(ADWSAuthType):
 class KerberosAuth(ADWSAuthType):
     """
     Authentification Kerberos via le cache d'identifiants KRB5CCNAME.
-    Le ticket (TGT ou TGS LDAP) doit être présent dans le ccache pointé par
+    The ticket (TGT or LDAP TGS) must be present in the ccache pointed to by
     la variable d'environnement KRB5CCNAME.
     """
     def __init__(self, kdc_host: str | None = None):
-        # Hôte du KDC à interroger pour demander un TGS LDAP si seul un TGT
-        # est présent dans le cache. Si None, on retombe sur le FQDN cible.
+        # KDC host to query for an LDAP TGS if only a TGT
+        # is present in the cache. If None, fall back on the target FQDN.
         self.kdc_host = kdc_host
 
 class ADWSConnect:

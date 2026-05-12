@@ -7,8 +7,8 @@ import unicodedata
 
 def collect_groups(ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
     """
-    Collecte tous les groupes AD depuis l'annuaire ou un cache.
-    Ne filtre PAS sur le contenu de objectClass ou autre.
+    Collect all AD groups from the directory or from a cache.
+    No filtering on objectClass or other attributes.
     """
     import json
     if cache_file:
@@ -23,7 +23,7 @@ def collect_groups(ip=None, domain=None, username=None, auth=None, base_dn_overr
                 objs = list(cache_data.values())
         else:
             objs = cache_data
-        # On ne filtre plus : on prend tous les objets avec un DN (pour éviter None)
+        # No filtering: take all objects with a DN (to avoid None)
         groups = [
             o for o in objs
             if o.get("distinguishedName") and isinstance(o.get("distinguishedName"), str)
@@ -44,7 +44,7 @@ def collect_groups(ip=None, domain=None, username=None, auth=None, base_dn_overr
             attributes=attributes,
             base_dn_override=base_dn_override
         ).get("objects", [])
-        # On ne filtre plus : on prend tous les objets avec un DN (pour éviter None)
+        # No filtering: take all objects with a DN (to avoid None)
         groups = [
             o for o in raw_objects
             if o.get("distinguishedName") and isinstance(o.get("distinguishedName"), str)
@@ -53,7 +53,7 @@ def collect_groups(ip=None, domain=None, username=None, auth=None, base_dn_overr
         return groups
 
 def is_real_group(obj):
-    # Simple vérification de base, comme BloodHound
+    # Simple basic check, like BloodHound
     object_class = obj.get("objectClass", [])
     if isinstance(object_class, list):
         return "group" in [x.lower() for x in object_class]
@@ -69,7 +69,7 @@ def prefix_well_known_sid(sid: str, domain_name: str, domain_sid: str, well_know
     return sid
 
 def is_highvalue(sid):
-    # Comme BH: Domain Admins, Enterprise Admins, Schema Admins, et quelques groupes bien connus
+    # Like BloodHound: Domain Admins, Enterprise Admins, Schema Admins, and a few well-known groups
     if sid.endswith("-512") or sid.endswith("-516") or sid.endswith("-519"):
         return True
     return sid in [
@@ -195,7 +195,7 @@ def load_cache(cache_path):
 
 def format_groups(
     raw_groups, domain, main_domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map,
-    debug=False  # Le paramètre n'est plus utilisé mais conservé pour compatibilité éventuelle
+    debug=False  # Parameter no longer used, kept for backward compatibility
 ):
     formatted_groups = []
     domain_upper = domain.upper()
@@ -237,9 +237,9 @@ def format_groups(
         if isinstance(raw_members, str):
             raw_members = [raw_members]
 
-        # Log groupe et membres bruts systématiquement
+        # Always log raw group and members
         #print(f"\n[DEBUG] Groupe: {dn} (sAMAccountName: {obj.get('sAMAccountName', '')})")
-        #print(f"  Membres bruts: {raw_members if raw_members else 'Aucun'}")
+        #print(f"  Raw members: {raw_members if raw_members else 'None'}")
 
         for m_dn in raw_members:
             if not m_dn:
@@ -263,14 +263,14 @@ def format_groups(
                 m_id = value_to_id_cache.get(m_dn_norm)
                 m_type = id_to_type_cache.get(m_id)
 
-            # Log résolution systématique
-            #print(f"    > Membre: {m_dn}")
+            # Always log resolution
+            #print(f"    > Member: {m_dn}")
           #  if not m_id:
-                #print(f"      -> Introuvable dans value_to_id_cache: '{m_dn_norm}'")
+                #print(f"      -> Not found in value_to_id_cache: '{m_dn_norm}'")
            # elif not m_type:
-                #print(f"      -> Type inconnu pour membre {m_dn} (ID: {m_id})")
+                #print(f"      -> Unknown type for member {m_dn} (ID: {m_id})")
             #else:
-                #print(f"      -> Résolu: {m_id} (type {m_type})")
+                #print(f"      -> Resolved: {m_id} (type {m_type})")
 
             if m_id and m_type is not None:
                 if m_type == 0:
@@ -282,10 +282,10 @@ def format_groups(
                     "ObjectType": m_type_label
                 })
 
-                    # Log résumé des membres résolus
-        #print(f"  Membres résolus pour ce groupe :")
+                    # Log summary of resolved members
+        #print(f"  Resolved members for this group:")
        # if not members:
-            #print("    Aucun membre résolu pour ce groupe.")
+            #print("    No resolved members for this group.")
         #for m in members:
             #print(f"    - {m}")
 

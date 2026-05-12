@@ -100,7 +100,7 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
         return entry, []
     
     sd = SecurityDescriptor(BytesIO(acl))
-   # logging.debug("[parse_binary_acl] SecurityDescriptor chargé")
+   # logging.debug("[parse_binary_acl] SecurityDescriptor loaded")
     #logging.debug(f"[parse_binary_acl] EntryType: {entrytype}")
     # Check for protected DACL flag
     entry['IsACLProtected'] = sd.has_control(sd.PD)
@@ -114,7 +114,7 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
     # Ignore Creator Owner or Local System
     if osid not in ignoresids:
         relations.append(build_relation(osid, 'Owns', inherited=False))
-        #logging.debug(f"[parse_binary_acl] Nombre d'ACEs trouvées : {len(sd.dacl.aces)}")
+        #logging.debug(f"[parse_binary_acl] Number of ACEs found: {len(sd.dacl.aces)}")
     for ace_object in sd.dacl.aces:
 
         logging.debug(f"[parse_binary_acl] Traitement de ACE: {ace_object}")
@@ -364,7 +364,7 @@ def ace_applies(ace_guid, object_class, objecttype_guid_map):
     # Normalisation ici
     key = object_class.replace("-", "").lower()
     if key not in objecttype_guid_map:
-        logging.warning(f"Class {object_class!r} (clé {key!r}) absente du mapping objecttype_guid_map")
+        logging.warning(f"Class {object_class!r} (key {key!r}) missing from objecttype_guid_map")
         return False
     return ace_guid == objecttype_guid_map[key]
 

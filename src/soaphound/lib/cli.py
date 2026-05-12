@@ -8,7 +8,7 @@ def gen_cli_args():
     #parser.add_argument("--debug", action="store_true", help="Enable DEBUG output")
     #parser.add_argument("--ts", action="store_true", help="Add timestamp to logs")
     #parser.add_argument("--hash", action="store", metavar="NTHASH", help="NT hash for auth")
-    #parser.add_argument("--output-dir", type=str, default="output", help="Répertoire de sortie pour les fichiers exportés (défaut: ./output)")
+    #parser.add_argument("--output-dir", type=str, default="output", help="Output directory for exported files (default: ./output)")
     #parser.add_argument("--adws-only", action="store_true", help="Collect computers only via ADWS (no session/RPC/SMB data)")
 
     #bh_group = parser.add_argument_group('BloodHound, Cache & PKI Collection')
@@ -53,17 +53,17 @@ def gen_cli_args():
     auopts.add_argument('-k',
                         '--kerberos',
                         action='store_true',
-                        help='Authentification Kerberos via le ticket présent dans le ccache pointé par KRB5CCNAME.')
+                        help='Kerberos authentication using the ticket in the ccache pointed to by KRB5CCNAME.')
     auopts.add_argument('-aesKey',
                         '--aes-key',
                         action='store',
                         metavar='HEXKEY',
-                        help='Clé AES (128/256 bits) pour l\'authentification Kerberos (utilisée pour la collecte SMB en mode Default).')
+                        help='AES key (128/256 bits) for Kerberos authentication (used for SMB collection in Default mode).')
     auopts.add_argument('-dc-ip',
                         '--kdc-ip',
                         action='store',
                         metavar='HOST',
-                        help='IP/hôte du KDC. Utile lorsque le DC ADWS et le KDC diffèrent (par défaut: valeur de -dc).')
+                        help='KDC IP/host. Useful when the ADWS DC and the KDC differ (default: value of -dc).')
 
     coopts = parser.add_argument_group('collection options')
 
