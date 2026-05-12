@@ -142,22 +142,22 @@ class ComputerEnumerator(MembershipEnumerator):
                         sessions.extend(ts_sessions)
                 # Si on ne collecte pas, sessions reste une liste vide
 
-                # Affichage debug immédiat
+                # Immediate debug output
                 #if sessions:
-                #    #print(f"[+] Sessions collectées sur {hostname}:")
+                #    #print(f"[+] Sessions collected on {hostname}:")
                 #    for sess in sessions:
                 #        print("    ", sess)
                 #else:
-                #    print(f"[DEBUG] Aucun utilisateur connecté à {hostname}.")
+                #    print(f"[DEBUG] No logged-in user on {hostname}.")
 
 
                 #Affichage temporaire pour debug
                 #if sessions:
-                #    print(f"[+] Sessions collectées sur {hostname}:")
+                #    print(f"[+] Sessions collected on {hostname}:")
                 #    for sess in sessions:
                 #        print("    ", sess)
                 #else:
-                #    print(f"[DEBUG] Aucun utilisateur connecté à {hostname}.")
+                #    print(f"[DEBUG] No logged-in user on {hostname}.")
 
                 
 
@@ -202,7 +202,7 @@ class ComputerEnumerator(MembershipEnumerator):
                 use_gc = self.addomain.num_domains > 1 and self.do_gc_lookup
 
                 # Process found sessions
-                #print(f"[DEBUG] Sessions combinées à traiter sur {hostname}: {sessions}")
+                #print(f"[DEBUG] Combined sessions to process on {hostname}: {sessions}")
                 #print(">>>>>>>>>>>>>>>>>>>>>> je cherche le username "+str(sessions[1]))
                 for ses in sessions:
                    # print("[>>>>>>>>>>>>>>>>>>>>>>DEBUG] Session brute:", ses)
@@ -214,7 +214,7 @@ class ComputerEnumerator(MembershipEnumerator):
                     if user_sid and user_sid not in session_users_by_machine[key]:
                         session_users_by_machine[key].append({
                             "session_type": session_type,
-                            "usersid": user_sid,           # Résolu dans la boucle !
+                            "usersid": user_sid,           # Resolved in the loop
                             "computersid": objectsid       # SID de la machine courante
                         })
 
@@ -235,13 +235,13 @@ class ComputerEnumerator(MembershipEnumerator):
                             users = [user['attributes']['objectSid'] for user in entries]
                             self.addomain.samcache.put(uname, users)
                         else:
-                            #print(f"[WARNING] Impossible de résoudre le SID pour {uname}")
+                            #print(f"[WARNING] Could not resolve SID for {uname}")
                             users = None
 
                     if users:
-                        user_sid = users[0]  # ou autre logique si plusieurs SIDs (tu veux le premier ?)
+                        user_sid = users[0]  # take the first SID if multiple
                     else:
-                        #print(f"[WARNING] Aucune entrée SID trouvée pour l'utilisateur '{uname}' sur {hostname}")
+                        #print(f"[WARNING] No SID entry found for user '{uname}' on {hostname}")
                         
                         continue
 
@@ -266,7 +266,7 @@ class ComputerEnumerator(MembershipEnumerator):
                             logging.warning('Failed to resolve SAM name %s in current forest', ses['user'])
                             continue  # On ne traite pas cette session si l'utilisateur est inconnu
 
-                    # users doit maintenant exister et être non-vide
+                    # users must now exist and be non-empty
                     if not users:
                         logging.warning('No users found for session user %s', ses['username'])
                         continue
@@ -307,7 +307,7 @@ class ComputerEnumerator(MembershipEnumerator):
                             "SessionFrom": ses.get('client') or ses.get('remote_ip') or "",   # selon ce que tu as dispo
                             "SessionType": "RDP" if ses.get('session_name') == "Console" else "SMB"
                         })
-                        #print(f"[DEBUG] c.sessions après traitement: {c.sessions}")
+                        #print(f"[DEBUG] c.sessions after processing: {c.sessions}")
                 # Loggons
                 for user, userdomain in loggedon:
                     fupn = '%s@%s' % (user.upper(), userdomain.upper())
@@ -369,7 +369,7 @@ class ComputerEnumerator(MembershipEnumerator):
 
             results_q.put(('computer', c.get_bloodhound_data(entry, self.collect)))
             
-            #print("[DEBUG] Utilisateurs connectés par machine:")
+            #print("[DEBUG] Logged-in users per host:")
             #for machinename, users in session_users_by_machine.items():
             #    print(f"{machinename}: {users}")
 

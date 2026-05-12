@@ -1,0 +1,483 @@
+diff --git a/src/soaphound/ad/acls.py b/src/soaphound/ad/acls.py
+index 166a96a..a450e25 100755
+--- a/src/soaphound/ad/acls.py
++++ b/src/soaphound/ad/acls.py
+@@ -100,7 +100,7 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
+         return entry, []
+     
+     sd = SecurityDescriptor(BytesIO(acl))
+-   # logging.debug("[parse_binary_acl] SecurityDescriptor chargé")
++   # logging.debug("[parse_binary_acl] SecurityDescriptor loaded")
+     #logging.debug(f"[parse_binary_acl] EntryType: {entrytype}")
+     # Check for protected DACL flag
+     entry['IsACLProtected'] = sd.has_control(sd.PD)
+@@ -114,7 +114,7 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
+     # Ignore Creator Owner or Local System
+     if osid not in ignoresids:
+         relations.append(build_relation(osid, 'Owns', inherited=False))
+-        #logging.debug(f"[parse_binary_acl] Nombre d'ACEs trouvées : {len(sd.dacl.aces)}")
++        #logging.debug(f"[parse_binary_acl] Number of ACEs found: {len(sd.dacl.aces)}")
+     for ace_object in sd.dacl.aces:
+ 
+         logging.debug(f"[parse_binary_acl] Traitement de ACE: {ace_object}")
+@@ -364,7 +364,7 @@ def ace_applies(ace_guid, object_class, objecttype_guid_map):
+     # Normalisation ici
+     key = object_class.replace("-", "").lower()
+     if key not in objecttype_guid_map:
+-        logging.warning(f"Class {object_class!r} (clé {key!r}) absente du mapping objecttype_guid_map")
++        logging.warning(f"Class {object_class!r} (key {key!r}) missing from objecttype_guid_map")
+         return False
+     return ace_guid == objecttype_guid_map[key]
+ 
+diff --git a/src/soaphound/ad/adws.py b/src/soaphound/ad/adws.py
+index 2280f62..49fd4eb 100755
+--- a/src/soaphound/ad/adws.py
++++ b/src/soaphound/ad/adws.py
+@@ -173,12 +173,12 @@ class NTLMAuth(ADWSAuthType):
+ class KerberosAuth(ADWSAuthType):
+     """
+     Authentification Kerberos via le cache d'identifiants KRB5CCNAME.
+-    Le ticket (TGT ou TGS LDAP) doit être présent dans le ccache pointé par
++    The ticket (TGT or LDAP TGS) must be present in the ccache pointed to by
+     la variable d'environnement KRB5CCNAME.
+     """
+     def __init__(self, kdc_host: str | None = None):
+-        # Hôte du KDC à interroger pour demander un TGS LDAP si seul un TGT
+-        # est présent dans le cache. Si None, on retombe sur le FQDN cible.
++        # KDC host to query for an LDAP TGS if only a TGT
++        # is present in the cache. If None, fall back on the target FQDN.
+         self.kdc_host = kdc_host
+ 
+ class ADWSConnect:
+diff --git a/src/soaphound/ad/collectors/bh_rpc_computer.py b/src/soaphound/ad/collectors/bh_rpc_computer.py
+index 7f2888b..5d0559c 100755
+--- a/src/soaphound/ad/collectors/bh_rpc_computer.py
++++ b/src/soaphound/ad/collectors/bh_rpc_computer.py
+@@ -270,9 +270,9 @@ class ADComputer(object):
+                 q = self.ad.dnsresolver.query(self.hostname, 'A', tcp=self.ad.dns_tcp)
+                 for r in q:
+                     addr = r.address
+-           #     print(f"[DEBUG] Résolution DNS pour {self.hostname}: {addr}")   
++           #     print(f"[DEBUG] DNS resolution for {self.hostname}: {addr}")   
+                 if addr == None:
+-            #        print(f"[DEBUG] Résolution DNS = échec pour {self.hostname}")
++            #        print(f"[DEBUG] DNS resolution failed for {self.hostname}")
+                     return False
+             except Exception as e:
+              #   print(f"[DEBUG] DNS error for {self.hostname}: {e}")
+@@ -507,7 +507,7 @@ class ADComputer(object):
+     #        print(f"[DEBUG] Exception lors de dce_rpc_connect() dans rpc_get_sessions: {e}")
+             return []
+         if dce is None:
+-        #    print("[DEBUG] dce est None, échec de la connexion DCE/RPC.")
++        #    print("[DEBUG] dce is None, DCE/RPC connection failed.")
+             return []
+ 
+         try:
+@@ -918,7 +918,7 @@ class ADComputer(object):
+ 
+     def tsts_get_sessions(self):
+         """
+-        Enumère les sessions Terminal Services (RDP) via TSHandler (tstool.py)
++        Enumerates Terminal Services (RDP) sessions via TSHandler (tstool.py)
+         Retourne la liste des sessions au format enrichi.
+         """
+         sessions = []
+diff --git a/src/soaphound/ad/collectors/domain.py b/src/soaphound/ad/collectors/domain.py
+index 5265d04..ccf1dee 100755
+--- a/src/soaphound/ad/collectors/domain.py
++++ b/src/soaphound/ad/collectors/domain.py
+@@ -61,7 +61,7 @@ def prefix_well_known_sid(sid: str, domain_name: str, domain_sid: str, well_know
+ def get_child_objects_adws(parent_dn, data_child_main):
+     """
+     Retourne tous les enfants directs d'un objet AD (domaine/container/OU) selon la DN, pour ADWS.
+-    Privilégie l'ObjectSID quand il existe, sinon fallback sur l'ObjectGUID.
++    Prefers ObjectSID when available, falls back to ObjectGUID otherwise.
+     """
+     parent_dn_upper = parent_dn.upper()
+     children = []
+@@ -74,23 +74,23 @@ def get_child_objects_adws(parent_dn, data_child_main):
+             continue
+         dn_child_upper = dn_child.upper()
+ 
+-        # Vérifie si c'est un enfant direct (niveau hiérarchique +1)
++        # Check if it's a direct child (hierarchy level +1)
+         if dn_child_upper.endswith("," + parent_dn_upper) and \
+            dn_child_upper.count(",") == parent_dn_upper.count(",") + 1:
+ 
+-            # Détection du type
++            # Detect the type
+             obj_type = obj_classes[0] if isinstance(obj_classes, list) and obj_classes else obj_classes or "Unknown"
+             if obj_type.lower() == "top" and isinstance(obj_classes, list) and len(obj_classes) > 1:
+                 obj_type = obj_classes[1]
+ 
+-            # Privilégier le SID si dispo
++            # Prefer the SID when available
+             object_id = None
+             if isinstance(sid_child, bytes):
+                 object_id = LDAP_SID(sid_child).formatCanonical()
+             elif isinstance(sid_child, str) and sid_child.upper().startswith("S-1-"):
+                 object_id = sid_child.upper()
+ 
+-            # Sinon fallback GUID
++            # Otherwise fall back to GUID
+             if not object_id and guid_child:
+                 object_id = str(UUID(bytes_le=guid_child)) if isinstance(guid_child, bytes) else guid_child
+ 
+diff --git a/src/soaphound/ad/collectors/group.py b/src/soaphound/ad/collectors/group.py
+index 3d399b7..78cf559 100755
+--- a/src/soaphound/ad/collectors/group.py
++++ b/src/soaphound/ad/collectors/group.py
+@@ -7,8 +7,8 @@ import unicodedata
+ 
+ def collect_groups(ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
+     """
+-    Collecte tous les groupes AD depuis l'annuaire ou un cache.
+-    Ne filtre PAS sur le contenu de objectClass ou autre.
++    Collect all AD groups from the directory or from a cache.
++    No filtering on objectClass or other attributes.
+     """
+     import json
+     if cache_file:
+@@ -23,7 +23,7 @@ def collect_groups(ip=None, domain=None, username=None, auth=None, base_dn_overr
+                 objs = list(cache_data.values())
+         else:
+             objs = cache_data
+-        # On ne filtre plus : on prend tous les objets avec un DN (pour éviter None)
++        # No filtering: take all objects with a DN (to avoid None)
+         groups = [
+             o for o in objs
+             if o.get("distinguishedName") and isinstance(o.get("distinguishedName"), str)
+@@ -44,7 +44,7 @@ def collect_groups(ip=None, domain=None, username=None, auth=None, base_dn_overr
+             attributes=attributes,
+             base_dn_override=base_dn_override
+         ).get("objects", [])
+-        # On ne filtre plus : on prend tous les objets avec un DN (pour éviter None)
++        # No filtering: take all objects with a DN (to avoid None)
+         groups = [
+             o for o in raw_objects
+             if o.get("distinguishedName") and isinstance(o.get("distinguishedName"), str)
+@@ -53,7 +53,7 @@ def collect_groups(ip=None, domain=None, username=None, auth=None, base_dn_overr
+         return groups
+ 
+ def is_real_group(obj):
+-    # Simple vérification de base, comme BloodHound
++    # Simple basic check, like BloodHound
+     object_class = obj.get("objectClass", [])
+     if isinstance(object_class, list):
+         return "group" in [x.lower() for x in object_class]
+@@ -69,7 +69,7 @@ def prefix_well_known_sid(sid: str, domain_name: str, domain_sid: str, well_know
+     return sid
+ 
+ def is_highvalue(sid):
+-    # Comme BH: Domain Admins, Enterprise Admins, Schema Admins, et quelques groupes bien connus
++    # Like BloodHound: Domain Admins, Enterprise Admins, Schema Admins, and a few well-known groups
+     if sid.endswith("-512") or sid.endswith("-516") or sid.endswith("-519"):
+         return True
+     return sid in [
+@@ -195,7 +195,7 @@ def load_cache(cache_path):
+ 
+ def format_groups(
+     raw_groups, domain, main_domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map,
+-    debug=False  # Le paramètre n'est plus utilisé mais conservé pour compatibilité éventuelle
++    debug=False  # Parameter no longer used, kept for backward compatibility
+ ):
+     formatted_groups = []
+     domain_upper = domain.upper()
+@@ -237,9 +237,9 @@ def format_groups(
+         if isinstance(raw_members, str):
+             raw_members = [raw_members]
+ 
+-        # Log groupe et membres bruts systématiquement
++        # Always log raw group and members
+         #print(f"\n[DEBUG] Groupe: {dn} (sAMAccountName: {obj.get('sAMAccountName', '')})")
+-        #print(f"  Membres bruts: {raw_members if raw_members else 'Aucun'}")
++        #print(f"  Raw members: {raw_members if raw_members else 'None'}")
+ 
+         for m_dn in raw_members:
+             if not m_dn:
+@@ -263,14 +263,14 @@ def format_groups(
+                 m_id = value_to_id_cache.get(m_dn_norm)
+                 m_type = id_to_type_cache.get(m_id)
+ 
+-            # Log résolution systématique
+-            #print(f"    > Membre: {m_dn}")
++            # Always log resolution
++            #print(f"    > Member: {m_dn}")
+           #  if not m_id:
+-                #print(f"      -> Introuvable dans value_to_id_cache: '{m_dn_norm}'")
++                #print(f"      -> Not found in value_to_id_cache: '{m_dn_norm}'")
+            # elif not m_type:
+-                #print(f"      -> Type inconnu pour membre {m_dn} (ID: {m_id})")
++                #print(f"      -> Unknown type for member {m_dn} (ID: {m_id})")
+             #else:
+-                #print(f"      -> Résolu: {m_id} (type {m_type})")
++                #print(f"      -> Resolved: {m_id} (type {m_type})")
+ 
+             if m_id and m_type is not None:
+                 if m_type == 0:
+@@ -282,10 +282,10 @@ def format_groups(
+                     "ObjectType": m_type_label
+                 })
+ 
+-                    # Log résumé des membres résolus
+-        #print(f"  Membres résolus pour ce groupe :")
++                    # Log summary of resolved members
++        #print(f"  Resolved members for this group:")
+        # if not members:
+-            #print("    Aucun membre résolu pour ce groupe.")
++            #print("    No resolved members for this group.")
+         #for m in members:
+             #print(f"    - {m}")
+ 
+diff --git a/src/soaphound/ad/collectors/ou.py b/src/soaphound/ad/collectors/ou.py
+index 73ada60..9fe4518 100755
+--- a/src/soaphound/ad/collectors/ou.py
++++ b/src/soaphound/ad/collectors/ou.py
+@@ -9,7 +9,7 @@ import os
+ 
+ def collect_ous(ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
+     """
+-    Collecte les Organizational Units (OU) de l'annuaire AD (en live ou via cache).
++    Collect Organizational Units (OUs) from AD (live or via cache).
+     """
+     if cache_file:
+         with open(cache_file, "r", encoding="utf-8") as f:
+diff --git a/src/soaphound/ad/ms_nns.py b/src/soaphound/ad/ms_nns.py
+index c894bee..69e61c0 100755
+--- a/src/soaphound/ad/ms_nns.py
++++ b/src/soaphound/ad/ms_nns.py
+@@ -24,12 +24,12 @@ from impacket.krb5.gssapi import (
+     KRB5_AP_REQ,
+     CheckSumField,
+ )
+-# Constantes RFC 4121 utilisées par notre fallback GSS_Wrap_LDAP / GSS_Unwrap_LDAP
+-# pour les versions d'impacket antérieures à 0.13 qui n'exposent pas ces méthodes.
++# RFC 4121 constants used by our GSS_Wrap_LDAP / GSS_Unwrap_LDAP fallback
++# for impacket versions older than 0.13 that do not expose these methods.
+ try:
+     from impacket.krb5.gssapi import KG_USAGE_INITIATOR_SEAL, KG_USAGE_ACCEPTOR_SEAL
+ except ImportError:
+-    # valeurs RFC 4121 si jamais elles ne sont pas exposées
++    # RFC 4121 values in case they are not exposed by impacket
+     KG_USAGE_INITIATOR_SEAL = 24
+     KG_USAGE_ACCEPTOR_SEAL = 22
+ from impacket.krb5.kerberosv5 import getKerberosTGS
+@@ -43,21 +43,21 @@ KRB5_AP_REP = b"\x02\x00"
+ 
+ 
+ # ---------------------------------------------------------------------------
+-# Fallback de compatibilité pour les versions d'impacket sans GSS_Wrap_LDAP
++# Compatibility fallback for impacket versions without GSS_Wrap_LDAP
+ # ---------------------------------------------------------------------------
+-# Les méthodes GSSAPI_AES{128,256}.GSS_Wrap_LDAP et GSS_Unwrap_LDAP n'ont été
+-# ajoutées à impacket qu'à partir de la version 0.13. Sur les versions plus
+-# anciennes (0.11/0.12, encore présentes sur Parrot OS, Kali stable, etc.) on
+-# implémente la même logique ici à partir des primitives disponibles dans
++# The GSSAPI_AES{128,256}.GSS_Wrap_LDAP and GSS_Unwrap_LDAP methods were only
++# added to impacket starting in version 0.13. On older versions (0.11/0.12,
++# still shipped on Parrot OS, Kali stable, etc.) we re-implement the same
++# logic here using the primitives available in impacket and pycryptodomex.
+ # toutes les versions: WRAP(), cipherType(), rotate(), unrotate().
+-# RFC 4121 §4.2.6.2: l'AP-REP côté KDC fournit la sub-key, le RRC vaut 28
+-# quand le chiffrement est demandé.
++# RFC 4121 §4.2.6.2: the AP-REP from the KDC provides the sub-key, RRC is 28
++# when encryption is requested.
+ 
+ def _gss_wrap_ldap_aes_compat(gss, sessionKey, data, sequenceNumber):
+     """Equivalent de GSSAPI_AES.GSS_Wrap_LDAP pour impacket < 0.13.
+ 
+-    Retourne (cipherText, header) où header est le WRAP token RFC 4121
+-    et cipherText l'intégralité des données chiffrées+rotation.
++    Returns (cipherText, header) where header is the RFC 4121 WRAP token
++    and cipherText the full encrypted+rotated payload.
+     """
+     token = gss.WRAP()
+     cipher = gss.cipherType()
+diff --git a/src/soaphound/lib/cli.py b/src/soaphound/lib/cli.py
+index 37eb960..9fcf610 100755
+--- a/src/soaphound/lib/cli.py
++++ b/src/soaphound/lib/cli.py
+@@ -8,7 +8,7 @@ def gen_cli_args():
+     #parser.add_argument("--debug", action="store_true", help="Enable DEBUG output")
+     #parser.add_argument("--ts", action="store_true", help="Add timestamp to logs")
+     #parser.add_argument("--hash", action="store", metavar="NTHASH", help="NT hash for auth")
+-    #parser.add_argument("--output-dir", type=str, default="output", help="Répertoire de sortie pour les fichiers exportés (défaut: ./output)")
++    #parser.add_argument("--output-dir", type=str, default="output", help="Output directory for exported files (default: ./output)")
+     #parser.add_argument("--adws-only", action="store_true", help="Collect computers only via ADWS (no session/RPC/SMB data)")
+ 
+     #bh_group = parser.add_argument_group('BloodHound, Cache & PKI Collection')
+@@ -53,17 +53,17 @@ def gen_cli_args():
+     auopts.add_argument('-k',
+                         '--kerberos',
+                         action='store_true',
+-                        help='Authentification Kerberos via le ticket présent dans le ccache pointé par KRB5CCNAME.')
++                        help='Kerberos authentication using the ticket in the ccache pointed to by KRB5CCNAME.')
+     auopts.add_argument('-aesKey',
+                         '--aes-key',
+                         action='store',
+                         metavar='HEXKEY',
+-                        help='Clé AES (128/256 bits) pour l\'authentification Kerberos (utilisée pour la collecte SMB en mode Default).')
++                        help='AES key (128/256 bits) for Kerberos authentication (used for SMB collection in Default mode).')
+     auopts.add_argument('-dc-ip',
+                         '--kdc-ip',
+                         action='store',
+                         metavar='HOST',
+-                        help='IP/hôte du KDC. Utile lorsque le DC ADWS et le KDC diffèrent (par défaut: valeur de -dc).')
++                        help='KDC IP/host. Useful when the ADWS DC and the KDC differ (default: value of -dc).')
+ 
+     coopts = parser.add_argument_group('collection options')
+ 
+diff --git a/src/soaphound/lib/computers.py b/src/soaphound/lib/computers.py
+index 48a0730..cead71f 100755
+--- a/src/soaphound/lib/computers.py
++++ b/src/soaphound/lib/computers.py
+@@ -142,22 +142,22 @@ class ComputerEnumerator(MembershipEnumerator):
+                         sessions.extend(ts_sessions)
+                 # Si on ne collecte pas, sessions reste une liste vide
+ 
+-                # Affichage debug immédiat
++                # Immediate debug output
+                 #if sessions:
+-                #    #print(f"[+] Sessions collectées sur {hostname}:")
++                #    #print(f"[+] Sessions collected on {hostname}:")
+                 #    for sess in sessions:
+                 #        print("    ", sess)
+                 #else:
+-                #    print(f"[DEBUG] Aucun utilisateur connecté à {hostname}.")
++                #    print(f"[DEBUG] No logged-in user on {hostname}.")
+ 
+ 
+                 #Affichage temporaire pour debug
+                 #if sessions:
+-                #    print(f"[+] Sessions collectées sur {hostname}:")
++                #    print(f"[+] Sessions collected on {hostname}:")
+                 #    for sess in sessions:
+                 #        print("    ", sess)
+                 #else:
+-                #    print(f"[DEBUG] Aucun utilisateur connecté à {hostname}.")
++                #    print(f"[DEBUG] No logged-in user on {hostname}.")
+ 
+                 
+ 
+@@ -202,7 +202,7 @@ class ComputerEnumerator(MembershipEnumerator):
+                 use_gc = self.addomain.num_domains > 1 and self.do_gc_lookup
+ 
+                 # Process found sessions
+-                #print(f"[DEBUG] Sessions combinées à traiter sur {hostname}: {sessions}")
++                #print(f"[DEBUG] Combined sessions to process on {hostname}: {sessions}")
+                 #print(">>>>>>>>>>>>>>>>>>>>>> je cherche le username "+str(sessions[1]))
+                 for ses in sessions:
+                    # print("[>>>>>>>>>>>>>>>>>>>>>>DEBUG] Session brute:", ses)
+@@ -214,7 +214,7 @@ class ComputerEnumerator(MembershipEnumerator):
+                     if user_sid and user_sid not in session_users_by_machine[key]:
+                         session_users_by_machine[key].append({
+                             "session_type": session_type,
+-                            "usersid": user_sid,           # Résolu dans la boucle !
++                            "usersid": user_sid,           # Resolved in the loop
+                             "computersid": objectsid       # SID de la machine courante
+                         })
+ 
+@@ -235,13 +235,13 @@ class ComputerEnumerator(MembershipEnumerator):
+                             users = [user['attributes']['objectSid'] for user in entries]
+                             self.addomain.samcache.put(uname, users)
+                         else:
+-                            #print(f"[WARNING] Impossible de résoudre le SID pour {uname}")
++                            #print(f"[WARNING] Could not resolve SID for {uname}")
+                             users = None
+ 
+                     if users:
+-                        user_sid = users[0]  # ou autre logique si plusieurs SIDs (tu veux le premier ?)
++                        user_sid = users[0]  # take the first SID if multiple
+                     else:
+-                        #print(f"[WARNING] Aucune entrée SID trouvée pour l'utilisateur '{uname}' sur {hostname}")
++                        #print(f"[WARNING] No SID entry found for user '{uname}' on {hostname}")
+                         
+                         continue
+ 
+@@ -266,7 +266,7 @@ class ComputerEnumerator(MembershipEnumerator):
+                             logging.warning('Failed to resolve SAM name %s in current forest', ses['user'])
+                             continue  # On ne traite pas cette session si l'utilisateur est inconnu
+ 
+-                    # users doit maintenant exister et être non-vide
++                    # users must now exist and be non-empty
+                     if not users:
+                         logging.warning('No users found for session user %s', ses['username'])
+                         continue
+@@ -307,7 +307,7 @@ class ComputerEnumerator(MembershipEnumerator):
+                             "SessionFrom": ses.get('client') or ses.get('remote_ip') or "",   # selon ce que tu as dispo
+                             "SessionType": "RDP" if ses.get('session_name') == "Console" else "SMB"
+                         })
+-                        #print(f"[DEBUG] c.sessions après traitement: {c.sessions}")
++                        #print(f"[DEBUG] c.sessions after processing: {c.sessions}")
+                 # Loggons
+                 for user, userdomain in loggedon:
+                     fupn = '%s@%s' % (user.upper(), userdomain.upper())
+@@ -369,7 +369,7 @@ class ComputerEnumerator(MembershipEnumerator):
+ 
+             results_q.put(('computer', c.get_bloodhound_data(entry, self.collect)))
+             
+-            #print("[DEBUG] Utilisateurs connectés par machine:")
++            #print("[DEBUG] Logged-in users per host:")
+             #for machinename, users in session_users_by_machine.items():
+             #    print(f"{machinename}: {users}")
+ 
+diff --git a/src/soaphound/soaphound.py b/src/soaphound/soaphound.py
+index a9695c4..7b67d6b 100755
+--- a/src/soaphound/soaphound.py
++++ b/src/soaphound/soaphound.py
+@@ -48,7 +48,7 @@ def clean_bytes(obj):
+ def zip_bloodhound_jsons(output_dir, timestamp,  archive_name="BloodHound.zip"):
+     """
+     Archive tous les fichiers .json du dossier output_dir en BloodHound.zip,
+-    sauf cache.json (insensible à la casse).
++    except cache.json (case-insensitive).
+     """
+     archive_path = archive_name
+     with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as archive:
+@@ -103,12 +103,12 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
+ 
+         krb5cc = os.getenv('KRB5CCNAME')
+         if not krb5cc:
+-            logging.warning("La variable KRB5CCNAME n'est pas définie. "
+-                            "Vérifiez que vous avez bien chargé un ticket (ex: export KRB5CCNAME=/tmp/ticket.ccache).")
++            logging.warning("The KRB5CCNAME variable is not set. "
++                            "Verify you have loaded a ticket (e.g. export KRB5CCNAME=/tmp/ticket.ccache).")
+         elif not os.path.isfile(krb5cc):
+-            logging.warning("Le fichier ccache pointé par KRB5CCNAME est introuvable: %s", krb5cc)
++            logging.warning("The ccache file pointed to by KRB5CCNAME was not found: %s", krb5cc)
+ 
+-        # Si l'utilisateur ne fournit pas -u/-d, on les déduit du ccache.
++        # If the user does not provide -u/-d, infer them from the ccache.
+         if (not options.username) or (not options.domain):
+             try:
+                 from impacket.krb5.ccache import CCache
+@@ -151,7 +151,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
+         auth = NTLMAuth(password=None, hashes=nt)
+     else:
+         logging.debug('Failed to parse options')
+-        logging.critical("Aucune méthode d'authentification valide. Utilisez -u/-p, --hashes, ou -k.")
++        logging.critical("No valid authentication method. Use -u/-p, --hashes, or -k.")
+         sys.exit(1)
+ 
+     print(banner)
+@@ -212,7 +212,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
+     )
+     all_child_items = data_child_main.get("objects", [])
+     
+-    # 4. Collecte principale (utilise default_dn pour le base_dn)
++    # 4. Main collection (uses default_dn for base_dn)
+     data_container_main = pull_all_ad_objects(
+         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
+         query=main_query, attributes=SOAPHOUND_CACHE_PROPERTIES, base_dn_override=default_dn
+@@ -339,8 +339,8 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
+             try:
+                 if not smb_auth.load_ccache():
+                     logging.warning("Impossible de charger un TGT depuis le ccache. "
+-                                    "La collecte de sessions SMB risque d'échouer. "
+-                                    "Vérifiez KRB5CCNAME et la validité du ticket.")
++                                    "SMB session collection may fail. "
++                                    "Verify KRB5CCNAME and the ticket validity.")
+             except Exception as e:
+                 logging.warning("Erreur lors du chargement du ccache: %s", e)
+         else:

@@ -270,9 +270,9 @@ class ADComputer(object):
                 q = self.ad.dnsresolver.query(self.hostname, 'A', tcp=self.ad.dns_tcp)
                 for r in q:
                     addr = r.address
-           #     print(f"[DEBUG] Résolution DNS pour {self.hostname}: {addr}")   
+           #     print(f"[DEBUG] DNS resolution for {self.hostname}: {addr}")   
                 if addr == None:
-            #        print(f"[DEBUG] Résolution DNS = échec pour {self.hostname}")
+            #        print(f"[DEBUG] DNS resolution failed for {self.hostname}")
                     return False
             except Exception as e:
              #   print(f"[DEBUG] DNS error for {self.hostname}: {e}")
@@ -507,7 +507,7 @@ class ADComputer(object):
     #        print(f"[DEBUG] Exception lors de dce_rpc_connect() dans rpc_get_sessions: {e}")
             return []
         if dce is None:
-        #    print("[DEBUG] dce est None, échec de la connexion DCE/RPC.")
+        #    print("[DEBUG] dce is None, DCE/RPC connection failed.")
             return []
 
         try:
@@ -918,7 +918,7 @@ class ADComputer(object):
 
     def tsts_get_sessions(self):
         """
-        Enumère les sessions Terminal Services (RDP) via TSHandler (tstool.py)
+        Enumerates Terminal Services (RDP) sessions via TSHandler (tstool.py)
         Retourne la liste des sessions au format enrichi.
         """
         sessions = []

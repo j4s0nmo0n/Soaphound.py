@@ -48,7 +48,7 @@ def clean_bytes(obj):
 def zip_bloodhound_jsons(output_dir, timestamp,  archive_name="BloodHound.zip"):
     """
     Archive tous les fichiers .json du dossier output_dir en BloodHound.zip,
-    sauf cache.json (insensible à la casse).
+    except cache.json (case-insensitive).
     """
     archive_path = archive_name
     with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -103,12 +103,12 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 
         krb5cc = os.getenv('KRB5CCNAME')
         if not krb5cc:
-            logging.warning("La variable KRB5CCNAME n'est pas définie. "
-                            "Vérifiez que vous avez bien chargé un ticket (ex: export KRB5CCNAME=/tmp/ticket.ccache).")
+            logging.warning("The KRB5CCNAME variable is not set. "
+                            "Verify you have loaded a ticket (e.g. export KRB5CCNAME=/tmp/ticket.ccache).")
         elif not os.path.isfile(krb5cc):
-            logging.warning("Le fichier ccache pointé par KRB5CCNAME est introuvable: %s", krb5cc)
+            logging.warning("The ccache file pointed to by KRB5CCNAME was not found: %s", krb5cc)
 
-        # Si l'utilisateur ne fournit pas -u/-d, on les déduit du ccache.
+        # If the user does not provide -u/-d, infer them from the ccache.
         if (not options.username) or (not options.domain):
             try:
                 from impacket.krb5.ccache import CCache
@@ -151,7 +151,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         auth = NTLMAuth(password=None, hashes=nt)
     else:
         logging.debug('Failed to parse options')
-        logging.critical("Aucune méthode d'authentification valide. Utilisez -u/-p, --hashes, ou -k.")
+        logging.critical("No valid authentication method. Use -u/-p, --hashes, or -k.")
         sys.exit(1)
 
     print(banner)
@@ -212,7 +212,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     )
     all_child_items = data_child_main.get("objects", [])
     
-    # 4. Collecte principale (utilise default_dn pour le base_dn)
+    # 4. Main collection (uses default_dn for base_dn)
     data_container_main = pull_all_ad_objects(
         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
         query=main_query, attributes=SOAPHOUND_CACHE_PROPERTIES, base_dn_override=default_dn
@@ -339,8 +339,8 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
             try:
                 if not smb_auth.load_ccache():
                     logging.warning("Impossible de charger un TGT depuis le ccache. "
-                                    "La collecte de sessions SMB risque d'échouer. "
-                                    "Vérifiez KRB5CCNAME et la validité du ticket.")
+                                    "SMB session collection may fail. "
+                                    "Verify KRB5CCNAME and the ticket validity.")
             except Exception as e:
                 logging.warning("Erreur lors du chargement du ccache: %s", e)
         else:
