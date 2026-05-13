@@ -45,3 +45,7 @@ bloodhound-*/
 *_containers.json
 *_domains.json
 20*_*.zip
+
+# Working artifacts (don't commit patches/diffs at root)
+*.patch
+*.diff
