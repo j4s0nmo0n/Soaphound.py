@@ -90,6 +90,27 @@ class ADComputer(object):
 
 
 
+    def _format_sid_friendly(self, sid):
+        """
+        Resolve a SID to DOMAIN\\samAccountName using the sid_to_sam_cache
+        stored on the shared ADDomain object (self.ad.sid_to_sam_cache).
+
+        Returns the raw SID string when:
+          - self.ad has no cache attribute,
+          - or the SID is not in the cache (external trusts, unknown
+            machine accounts, well-known SIDs not pre-populated).
+
+        Keeping the SID visible for unresolved entries is useful in
+        pentest output to spot cross-domain principals.
+        """
+        cache = getattr(self.ad, "sid_to_sam_cache", None) if self.ad else None
+        if not cache:
+            return sid
+        entry = cache.get(sid)
+        if entry and entry.get("sam") and entry.get("domain"):
+            return "{}\\{}".format(entry["domain"].upper(), entry["sam"])
+        return sid
+
     def get_bloodhound_data(self, entry, collect, skip_acl=False):
         data = {
             'ObjectIdentifier': self.objectsid,
@@ -611,7 +632,11 @@ class ADComputer(object):
                 resp = rrp.hBaseRegEnumKey(dce, key_handle, index)
                 sid = resp['lpNameOut'].rstrip('\0')
                 if re.match(sid_filter, sid):
-                    logging.info('User with SID %s is logged in on %s' % (sid, self.hostname))
+                    _display = self._format_sid_friendly(sid)
+                    if _display == sid:
+                        logging.info('User with SID %s is logged in on %s', sid, self.hostname)
+                    else:
+                        logging.info('User %s is logged in on %s', _display, self.hostname)
                     # Ignore local accounts (best effort, self.sid is only
                     # populated if we enumerated a group before)
                     if self.sid and sid.startswith(self.sid):

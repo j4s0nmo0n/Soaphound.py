@@ -362,6 +362,27 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         addomain.computersidcache = ObjectCache()
         addomain.num_domains = 1
 
+        # Build SID -> {sam, domain} cache from the already-collected users,
+        # groups, and computer accounts. Used by ADComputer._format_sid_friendly
+        # to display readable session principals (DOMAIN\\sam) instead of raw
+        # SIDs during NetSessionEnum / RegistryUsers enumeration.
+        try:
+            netbios_label = options.domain.split(".")[0].upper() if options.domain else "DOMAIN"
+            sid_cache = {}
+            for collection_bh in (users_bh, groups_bh):
+                for item in collection_bh or []:
+                    sid = item.get("ObjectIdentifier") or (item.get("Properties") or {}).get("objectsid")
+                    props = item.get("Properties") or {}
+                    sam = props.get("samaccountname")
+                    if sid and sam:
+                        sid_cache[sid] = {"sam": sam, "domain": netbios_label}
+            addomain.sid_to_sam_cache = sid_cache
+            logging.debug("Built sid_to_sam_cache with %d entries (NETBIOS=%s)",
+                          len(sid_cache), netbios_label)
+        except Exception as _e:
+            logging.warning("Could not build sid_to_sam_cache: %s -- session SIDs will display raw", _e)
+            addomain.sid_to_sam_cache = {}
+
         def get_domain_by_name(name):
             if name.lower() == addomain.name.lower():
                 return addomain
