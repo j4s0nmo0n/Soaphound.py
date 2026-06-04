@@ -49,3 +49,20 @@ bloodhound-*/
 # Working artifacts (don't commit patches/diffs at root)
 *.patch
 *.diff
+
+# Mission outputs - never commit
+Cache.json
+*.log
+soaphound-*.log
+
+# Helper scripts (kept local only)
+resolve_sids_in_log.py
+
+# BloodHound JSON outputs
+[0-9]*_users.json
+[0-9]*_computers.json
+[0-9]*_groups.json
+[0-9]*_ous.json
+[0-9]*_containers.json
+[0-9]*_gpos.json
+[0-9]*_domains.json

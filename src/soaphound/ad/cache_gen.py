@@ -7,6 +7,8 @@ from uuid import UUID
 from soaphound.ad.adws import ADWSConnect, NTLMAuth, KerberosAuth, ADWSAuthType
 from soaphound.ad.soap_templates import NAMESPACES
 from base64 import b64decode, b64encode
+from soaphound.ad.adws import ADWSReferralError
+from soaphound.ad.embedded_schema import EMBEDDED_OBJECTTYPE_GUID_MAP
 from impacket.ldap.ldaptypes import LDAP_SID
 
 from soaphound.ad.acls import parse_binary_acl
@@ -155,13 +157,22 @@ def adws_objecttype_guid_map(adws, schema_dn, follow_referrals=True) -> dict:
     }
     
     # Pass follow_referrals to pull()
-    et_classes = adws.pull(
-        query, 
-        attributes, 
-        use_schema=True, 
-        base_object_dn_for_soap=schema_dn,
-        follow_referrals=follow_referrals
-    )
+    try:
+        et_classes = adws.pull(
+            query, 
+            attributes, 
+            use_schema=True, 
+            base_object_dn_for_soap=schema_dn,
+            follow_referrals=follow_referrals
+        )
+    except ADWSReferralError as e:
+        logging.warning(
+            "Schema NC unavailable on queried DC (referral to %s) -- "
+            "falling back to embedded schema GUID map. Custom AD schema "
+            "extensions (Exchange, MIM, third-party) will not be resolved.",
+            e.referral_url,
+        )
+        return EMBEDDED_OBJECTTYPE_GUID_MAP.copy()
     
     if et_classes is not None:
         for item in et_classes.findall(".//ns1:classSchema", NAMESPACES):
@@ -176,13 +187,23 @@ def adws_objecttype_guid_map(adws, schema_dn, follow_referrals=True) -> dict:
                     pass
     
     # attributeSchema - also pass follow_referrals
-    et_attrs = adws.pull(
-        query, 
-        attributes, 
-        use_schema=True, 
-        base_object_dn_for_soap=schema_dn,
-        follow_referrals=follow_referrals
-    )
+    try:
+        et_attrs = adws.pull(
+            query, 
+            attributes, 
+            use_schema=True, 
+            base_object_dn_for_soap=schema_dn,
+            follow_referrals=follow_referrals
+        )
+    except ADWSReferralError as e:
+        logging.warning(
+            "AttributeSchema NC unavailable on queried DC (referral to %s) -- "
+            "merging current mapping with embedded schema GUID map.",
+            e.referral_url,
+        )
+        for k, v in EMBEDDED_OBJECTTYPE_GUID_MAP.items():
+            mapping.setdefault(k, v)
+        return mapping
     
     if et_attrs is not None:
         for item in et_attrs.findall(".//ns1:attributeSchema", NAMESPACES):
@@ -314,13 +335,26 @@ def _build_relation(sid, principal_type, rightname, inherited):
 def adws_object_classes(adws) -> set:
     """
     Retrieves all objectClass names from the schema via ADWS.
+
+    On multi-domain forests where the queried DC does not host the Schema NC
+    locally, ADWS returns an LDAP referral. In that case we return the set of
+    object class names derived from the embedded schema map, so downstream
+    code can still perform basic class name lookups.
     """
     query = "(lDAPDisplayName=*)"
     attributes = ["lDAPDisplayName"]
-    et = adws.pull(query, attributes, use_schema=True)
+    try:
+        et = adws.pull(query, attributes, use_schema=True)
+    except ADWSReferralError as e:
+        logging.warning(
+            "Schema NC unavailable for object class enumeration (referral to %s) -- "
+            "falling back to object classes derived from the embedded schema map.",
+            e.referral_url,
+        )
+        return set(EMBEDDED_OBJECTTYPE_GUID_MAP.keys())
     if et is None:
         logging.error("[adws_object_classes] Unable to collect object classes from the schema (use_schema)")
-        return set()
+        return set(EMBEDDED_OBJECTTYPE_GUID_MAP.keys())
 
     NAMESPACES = {
         "ns1": "http://schemas.microsoft.com/2008/1/ActiveDirectory/Data",

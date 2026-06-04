@@ -811,6 +811,11 @@ class ADDomain(object):
         self.netbios_name = netbios_name
         self.sid = sid
         self.distinguishedname = distinguishedname
+        # Cache for SID -> {sam, domain} lookups, populated after user/group/
+        # computer collection. Used by ADComputer._format_sid_friendly to
+        # display human-readable session principals (DOMAIN\sam) instead of
+        # raw SIDs. Empty by default for backward compatibility.
+        self.sid_to_sam_cache = {}
 
 
     @staticmethod
