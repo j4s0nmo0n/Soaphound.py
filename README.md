@@ -83,7 +83,21 @@ collection options:
 
 # Installation
 
-## With `pipx` (recommended)
+## From PyPI (recommended)
+
+```bash
+pipx install soaphound-py
+soaphound --help
+```
+
+> **Note on PyPI namespace** - The official PyPI distribution is **`soaphound-py`** (with the `-py` suffix). A separate package named `soaphound` was published on PyPI on 2026-03-29 by an unrelated third party; **that package is not maintained by this project**. Always install `soaphound-py`.
+
+To upgrade later:
+```bash
+pipx upgrade soaphound-py
+```
+
+## From git (alternative)
 
 ```bash
 pipx install git+https://github.com/j4s0nmo0n/Soaphound.py
@@ -93,13 +107,7 @@ soaphound --help
 With Shadow Credentials support (optional `dsinternals` dependency):
 
 ```bash
-pipx install "soaphound[shadowcred] @ git+https://github.com/j4s0nmo0n/Soaphound.py"
-```
-
-To upgrade later:
-
-```bash
-pipx upgrade soaphound
+pipx install "soaphound-py[shadowcred] @ git+https://github.com/j4s0nmo0n/Soaphound.py"
 ```
 
 ## With `poetry` (development)
