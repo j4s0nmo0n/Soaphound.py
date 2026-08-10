@@ -174,7 +174,7 @@ soaphound -d jjk.local -u yuji -dc adws.jjk.local -dc-ip kdc.jjk.local -k
 
 - [Falcon Force Team](https://falconforce.nl/soaphound-tool-to-collect-active-directory-data-via-adws/) for the initial inspiration.
 - [BloodHound.py](https://github.com/dirkjanm/BloodHound.py), for this amazing implementation of BloodHound ingestor.
-- [SOAPy](https://github.com/jlevere/SOAPy) by @_logangoins, whose Kerberos NNS implementation is the basis of the `-k` support.
+- [SOAPy](https://github.com/logangoins/SOAPy) by @_logangoins, whose Kerberos NNS implementation is the basis of the `-k` support.
 - [Microsoft](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-addm/59205cf6-aa8e-4f7e-be57-8b63640bf9a4) for the official protocol documentation.
 - [ERNW](https://insinuator.net/2016/08/pentesting-webservices-with-net-tcp-binding/) for the initial boost.
 - [X-Force Red](https://www.ibm.com/think/x-force/stealthy-enumeration-of-active-directory-environments-through-adws) for their brilliant implementation of NBFX and research insights.
