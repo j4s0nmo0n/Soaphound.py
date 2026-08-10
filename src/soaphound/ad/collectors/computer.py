@@ -254,30 +254,24 @@ def format_computers(
         t.start()
         threads.append(t)
 
-    process_queue.join()
-
     total_jobs = len(jobs)
     for job in jobs:
         process_queue.put(job)
 
-    # Sentinels to allow threads to terminate cleanly
-    for _ in range(len(computers)):
-        try:
-            _, bh_result = results_q.get(timeout=3)
-            formatted_computers.append(bh_result)
-        except queue.Empty:
-            continue
+    # Wait for all workers to finish AFTER jobs are enqueued
+    process_queue.join()
 
-    # Retrieving thread results
+    # Drain results non-blocking — offline machines emit nothing so we
+    # cannot wait for total_jobs results; drain whatever workers produced
     computer_results = {}
-    received = 0
-    while received < total_jobs:
+    while True:
         try:
-            hostname, bh_result = results_q.get(timeout=3)
-            computer_results[hostname.lower()] = bh_result
-            received += 1
+            item = results_q.get_nowait()
+            if item is None:
+                break
+            hostname_key, bh_result = item
+            computer_results[hostname_key.lower()] = bh_result
         except queue.Empty:
-            print("[!] Timeout or workers stuck.")
             break
 
     # SID cache resolution (loading from disk cache)
