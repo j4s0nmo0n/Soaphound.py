@@ -32,6 +32,9 @@ from soaphound.lib.memberships import MembershipEnumerator
 from soaphound.ad.collectors.bh_rpc_computer import ADComputer
 from soaphound.lib.utils import ADUtils
 
+_session_lock = threading.Lock()
+session_users_by_machine = {}
+
 class ComputerEnumerator(MembershipEnumerator):
     """
     Class to enumerate computers in the domain.
@@ -104,7 +107,8 @@ class ComputerEnumerator(MembershipEnumerator):
                 logging.debug('Skipping computer: %s (not allowlisted)', hostname)
                 continue
 
-            process_queue.put((hostname, samname, computer))
+            objectsid = ADUtils.get_entry_property(computer, 'objectSid')
+            process_queue.put((hostname, samname, objectsid, computer, result_q, None))
         process_queue.join()
         result_q.put(None)
         result_q.join()
@@ -115,11 +119,6 @@ class ComputerEnumerator(MembershipEnumerator):
         """
 
         logging.debug('Querying computer: %s', hostname)
-
-        if 'session_users_by_machine' not in globals():
-            global session_users_by_machine
-            session_users_by_machine = {}
-
 
         c = ADComputer(hostname=hostname, samname=samname, ad=self.addomain, addc=self.addc, objectsid=objectsid)
         
@@ -209,50 +208,41 @@ class ComputerEnumerator(MembershipEnumerator):
                     key = f"{hostname.lower()}_session_users"
                     if key not in session_users_by_machine:
                         session_users_by_machine[key] = []
-                    user_sid = ses.get('user')
+                    uname = ses.get('user') or ses.get('username', '')
                     session_type = "RDP" if ses.get('session_name') == "Console" else "SMB"
-                    if user_sid and user_sid not in session_users_by_machine[key]:
-                        session_users_by_machine[key].append({
-                            "session_type": session_type,
-                            "usersid": user_sid,           # Resolved in the loop
-                            "computersid": objectsid       # SID de la machine courante
-                        })
-
-                    #if isinstance(ses, dict):
-                    #    for k, v in ses.items():
-                    #        print(f"    {k}: {v}")
-                    #else:
-                    #    print(f"    [non-dict]: {ses!r}")
-
+                    with _session_lock:
+                        if key not in session_users_by_machine:
+                            session_users_by_machine[key] = []
+                        if uname and uname not in [s.get('username') for s in session_users_by_machine[key]]:
+                            session_users_by_machine[key].append({
+                                "session_type": session_type,
+                                "username": uname,
+                                "computersid": objectsid
+                            })
 
                     use_gc = self.addomain.num_domains > 1 and self.do_gc_lookup
-                    
+
                     try:
-                        users = self.addomain.samcache.get(user_sid)
+                        users = self.addomain.samcache.get(uname)
                     except KeyError:
-                        entries = self.addomain.objectresolver.resolve_samname(user_sid, use_gc=use_gc)
+                        entries = self.addomain.objectresolver.resolve_samname(uname, use_gc=use_gc)
                         if entries and len(entries) > 0:
                             users = [user['attributes']['objectSid'] for user in entries]
                             self.addomain.samcache.put(uname, users)
                         else:
-                            #print(f"[WARNING] Could not resolve SID for {uname}")
                             users = None
 
-                    if users:
-                        user_sid = users[0]  # take the first SID if multiple
-                    else:
-                        #print(f"[WARNING] No SID entry found for user '{uname}' on {hostname}")
-                        
+                    if not users:
                         continue
 
-                    for user_sid in users:
-                        session_users_by_machine[key].append({
-                            "username": uname,
-                            "session_type": session_type,
-                            "usersid": user_sid,
-                            "computersid": objectsid
-                        })
-                         #print(f"[DEBUG] Ajout de session SID={user_sid} User={uname} sur {hostname}")
+                    with _session_lock:
+                        for resolved_sid in users:
+                            session_users_by_machine[key].append({
+                                "username": uname,
+                                "session_type": session_type,
+                                "usersid": resolved_sid,
+                                "computersid": objectsid
+                            })
 
                     
                     try:
@@ -292,7 +282,8 @@ class ComputerEnumerator(MembershipEnumerator):
                         continue
                     if '.' not in target:
                         logging.debug('Resolved target does not look like an IP or domain. Assuming hostname: %s', target)
-                        target = '%s.%s' % (target, domain)
+                        # Use the domain from the addomain object instead of undefined 'domain'
+                        target = '%s.%s' % (target, self.addomain.domain)
                     # Resolve target hostname
                     try:
                         hostsid = self.addomain.computersidcache.get(target.lower())
@@ -351,7 +342,8 @@ class ComputerEnumerator(MembershipEnumerator):
                     logging.debug('Resolved Service UPN to SID: %s', user)
                     c.loggedon.append({'ComputerSID':objectsid, 'UserSID':user})
 
-                results_q.put(('computer', c.get_bloodhound_data(entry, self.collect)))
+                _computer_data = c.get_bloodhound_data(entry, self.collect)
+                results_q.put((hostname, _computer_data))
 
             except DCERPCException:
                 logging.debug(traceback.format_exc())
@@ -359,16 +351,12 @@ class ComputerEnumerator(MembershipEnumerator):
             except Exception as e:
                 logging.error('Unhandled exception in computer %s processing: %s', hostname, str(e))
                 logging.info(traceback.format_exc())
-           
-            #print("[DEBUG SESSIONS AVANT EXPORT]", c.sessions)
 
-            # AJOUT POUR FORMAT_COMPUTERS
             if all_sessions_users is not None:
                 host_key = f"{hostname.lower()}_session_users"
-                all_sessions_users[host_key] = list(session_users_by_machine.get(host_key, []))
+                with _session_lock:
+                    all_sessions_users[host_key] = list(session_users_by_machine.get(host_key, []))
 
-            results_q.put(('computer', c.get_bloodhound_data(entry, self.collect)))
-            
             #print("[DEBUG] Logged-in users per host:")
             #for machinename, users in session_users_by_machine.items():
             #    print(f"{machinename}: {users}")
@@ -377,11 +365,15 @@ class ComputerEnumerator(MembershipEnumerator):
         logging.debug('Start working')
         while True:
             args = process_queue.get()
-            # Adapte ici :
-            hostname, samname, comp_sid, entry, results_q, all_sessions_users = args
-            logging.info('Querying computer: %s', hostname)
-            self.process_computer(
-                hostname, samname, comp_sid, entry, results_q, all_sessions_users
-            )
-            process_queue.task_done()
+            try:
+                hostname, samname, comp_sid, entry, job_results_q, all_sessions_users = args
+                logging.debug('Querying computer: %s', hostname)
+                self.process_computer(
+                    hostname, samname, comp_sid, entry, job_results_q, all_sessions_users
+                )
+            except Exception as e:
+                logging.error('Worker exception for %s: %s', args[0] if args else '?', e)
+                logging.debug(traceback.format_exc())
+            finally:
+                process_queue.task_done()
 
