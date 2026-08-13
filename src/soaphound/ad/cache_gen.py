@@ -173,6 +173,13 @@ def adws_objecttype_guid_map(adws, schema_dn, follow_referrals=True) -> dict:
             e.referral_url,
         )
         return EMBEDDED_OBJECTTYPE_GUID_MAP.copy()
+    except (ConnectionError, OSError) as e:
+        logging.warning(
+            "ADWS connection lost while querying classSchema (%s) -- "
+            "falling back to embedded schema GUID map.",
+            e,
+        )
+        return EMBEDDED_OBJECTTYPE_GUID_MAP.copy()
     
     if et_classes is not None:
         for item in et_classes.findall(".//ns1:classSchema", NAMESPACES):
@@ -200,6 +207,15 @@ def adws_objecttype_guid_map(adws, schema_dn, follow_referrals=True) -> dict:
             "AttributeSchema NC unavailable on queried DC (referral to %s) -- "
             "merging current mapping with embedded schema GUID map.",
             e.referral_url,
+        )
+        for k, v in EMBEDDED_OBJECTTYPE_GUID_MAP.items():
+            mapping.setdefault(k, v)
+        return mapping
+    except (ConnectionError, OSError) as e:
+        logging.warning(
+            "ADWS connection lost while querying attributeSchema (%s) -- "
+            "merging current mapping with embedded schema GUID map.",
+            e,
         )
         for k, v in EMBEDDED_OBJECTTYPE_GUID_MAP.items():
             mapping.setdefault(k, v)
@@ -350,6 +366,13 @@ def adws_object_classes(adws) -> set:
             "Schema NC unavailable for object class enumeration (referral to %s) -- "
             "falling back to object classes derived from the embedded schema map.",
             e.referral_url,
+        )
+        return set(EMBEDDED_OBJECTTYPE_GUID_MAP.keys())
+    except (ConnectionError, OSError) as e:
+        logging.warning(
+            "ADWS connection lost during object class enumeration (%s) -- "
+            "falling back to object classes derived from the embedded schema map.",
+            e,
         )
         return set(EMBEDDED_OBJECTTYPE_GUID_MAP.keys())
     if et is None:
