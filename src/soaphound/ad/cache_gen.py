@@ -432,15 +432,59 @@ def filetime_to_unix(val):
             return 0
     return 0
 
-def create_and_combine_soaphound_cache(all_pulled_items, domain_root_dn, output_dir=".", domain_name=None):
+def _encode_binary_attrs_for_json(obj_dict):
     """
-    Generate and save the SOAPHound cache (IdToTypeCache + ValueToIdCache).
-    
+    Base64-encode known-binary ADWS attribute values (objectSid, objectGUID,
+    nTSecurityDescriptor, ...) so a raw AD object dict can be safely
+    round-tripped through json.dump/json.load. Non-binary attributes are
+    passed through untouched.
+    """
+    out = {}
+    for k, v in obj_dict.items():
+        if k.lower() in KNOWN_BINARY_ADWS_ATTRIBUTES:
+            if isinstance(v, bytes):
+                out[k] = {"__b64__": b64encode(v).decode("ascii")}
+            elif isinstance(v, list):
+                out[k] = [
+                    {"__b64__": b64encode(x).decode("ascii")} if isinstance(x, bytes) else x
+                    for x in v
+                ]
+            else:
+                out[k] = v
+        else:
+            out[k] = v
+    return out
+
+def _decode_binary_attrs_from_json(obj_dict):
+    """Inverse of _encode_binary_attrs_for_json."""
+    out = {}
+    for k, v in obj_dict.items():
+        if isinstance(v, dict) and "__b64__" in v:
+            out[k] = b64decode(v["__b64__"])
+        elif isinstance(v, list):
+            out[k] = [
+                b64decode(x["__b64__"]) if isinstance(x, dict) and "__b64__" in x else x
+                for x in v
+            ]
+        else:
+            out[k] = v
+    return out
+
+def create_and_combine_soaphound_cache(all_pulled_items, domain_root_dn, output_dir=".", domain_name=None, all_child_items=None):
+    """
+    Generate and save the SOAPHound cache (IdToTypeCache + ValueToIdCache),
+    along with the raw AD object dumps needed to resume a run later via
+    --resume-cache without re-walking the entire directory over ADWS.
+
     Args:
-        all_pulled_items: List of AD objects
+        all_pulled_items: List of AD objects (the full-property collection)
         domain_root_dn: DN of the domain root
         output_dir: Output directory (default: current directory)
         domain_name: Domain name to include in filename (optional)
+        all_child_items: List of AD objects from the lightweight child-objects
+            collection (used to resolve domain/OU/container children). Stored
+            alongside all_pulled_items so both initial ADWS bulk pulls can be
+            skipped on resume. Optional for backward compatibility.
     """
     # Build the cache filename with domain name
     if domain_name:
@@ -448,24 +492,70 @@ def create_and_combine_soaphound_cache(all_pulled_items, domain_root_dn, output_
         cache_filename = f"cache_{safe_domain}.json"
     else:
         cache_filename = "Cache.json"
-    
+
     combined_output_path = os.path.join(output_dir, cache_filename)
-    
+
     # Ensure directory exists before writing
     output_dir = output_dir or "."
     os.makedirs(output_dir, exist_ok=True)
-    
+
     logging.info(f"Initiating SOAPHound cache generation to {combined_output_path}...")
     id_to_type_dict, value_to_id_dict = _generate_individual_caches(all_pulled_items, domain_root_dn)
-    
+
     if not id_to_type_dict or not value_to_id_dict:
         logging.error("Failed to generate individual cache dictionaries. Combined cache not created.")
         return
-    
+
     try:
-        combined_data = {"IdToTypeCache": id_to_type_dict, "ValueToIdCache": value_to_id_dict}
+        combined_data = {
+            "IdToTypeCache": id_to_type_dict,
+            "ValueToIdCache": value_to_id_dict,
+            "DomainRootDN": domain_root_dn,
+            "RawObjects": [_encode_binary_attrs_for_json(o) for o in all_pulled_items],
+        }
+        if all_child_items is not None:
+            combined_data["RawChildObjects"] = [_encode_binary_attrs_for_json(o) for o in all_child_items]
         with open(combined_output_path, 'w', encoding='utf-8') as f:
             json.dump(combined_data, f, indent=2, ensure_ascii=False)
         logging.info(f"Cache.json saved to {combined_output_path}")
     except IOError as e:
         logging.error(f"Error writing cache files: {e}")
+
+def load_soaphound_cache(cache_path):
+    """
+    Load a previously saved SOAPHound cache to resume a run via --resume-cache,
+    skipping the two initial full-domain ADWS bulk pulls that build the
+    id_to_type/value_to_id caches (the slowest and most connection-sensitive
+    part of a run on large forests).
+
+    Returns a dict with keys: id_to_type_cache, value_to_id_cache, objs,
+    all_child_items, domain_root_dn.
+
+    Raises ValueError if the file doesn't contain the raw object dumps needed
+    to resume (e.g. it was produced by an older soaphound version, or by a
+    run where cache generation failed).
+    """
+    with open(cache_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    id_to_type_cache = data.get("IdToTypeCache")
+    value_to_id_cache = data.get("ValueToIdCache")
+    raw_objects = data.get("RawObjects")
+
+    if not id_to_type_cache or not value_to_id_cache or raw_objects is None:
+        raise ValueError(
+            f"'{cache_path}' does not contain the data needed to resume "
+            "(missing IdToTypeCache/ValueToIdCache/RawObjects). It may have been "
+            "produced by an older version of soaphound; delete it and run without "
+            "--resume-cache to regenerate it."
+        )
+
+    raw_child_objects = data.get("RawChildObjects", [])
+
+    return {
+        "id_to_type_cache": id_to_type_cache,
+        "value_to_id_cache": value_to_id_cache,
+        "objs": [_decode_binary_attrs_from_json(o) for o in raw_objects],
+        "all_child_items": [_decode_binary_attrs_from_json(o) for o in raw_child_objects],
+        "domain_root_dn": data.get("DomainRootDN"),
+    }

@@ -118,6 +118,17 @@ def gen_cli_args():
         help="Enrich CA configuration through Remote Registry/RPC (User Specified SAN, Request Disposition, Enforce Encryption, Active Policy)."
     )
 
+    coopts.add_argument(
+        "--resume-cache",
+        metavar="CACHE_FILE_PATH",
+        dest="resume_cache",
+        default=None,
+        help="Resume from a previously saved Cache.json instead of re-walking the "
+             "whole directory over ADWS to rebuild it. Skips the initial full-domain "
+             "object collection only; OUs/Groups/Users/Computers/GPOs/etc. are still "
+             "collected fresh."
+    )
+
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)

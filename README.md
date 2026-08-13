@@ -28,6 +28,7 @@ usage: soaphound [-h] [-c COLLECTIONMETHOD] -d DOMAIN [-v] [--ts] -u USERNAME
                  [-wk NUM_WORKERS] [--output-dir OUTPUT_DIR]
                  [--cert-find] [--cert-find-force-epa {auto,enabled,disabled}]
                  [--cert-find-skip-web-probe] [--cert-find-ca-rpc]
+                 [--resume-cache CACHE_FILE_PATH]
 
 Python based ingestor for BloodHound using ADWS
 
@@ -78,6 +79,12 @@ collection options:
   --cert-find-ca-rpc    Enrich CA configuration through Remote Registry/RPC:
                         User Specified SAN, Request Disposition, Enforce
                         Encryption, Active Policy.
+  --resume-cache CACHE_FILE_PATH
+                        Resume from a previously saved Cache.json instead of
+                        re-walking the whole directory over ADWS to rebuild it.
+                        Skips the initial full-domain object collection only;
+                        OUs/Groups/Users/Computers/GPOs/etc. are still collected
+                        fresh.
 
 ```
 
@@ -145,6 +152,15 @@ Perform ADCS information collection
 
 ```
 soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --cert-find --cert-find-force-epa auto
+```
+
+Resume a run from a previously saved `Cache.json` (skips re-walking the whole
+directory over ADWS to rebuild the object cache; useful on large forests or
+after a connection drop mid-run, since OUs/Groups/Users/Computers/etc. are
+still collected fresh)
+
+```
+soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output --resume-cache output/Cache.json
 ```
 
 # Kerberos authentication (-k)

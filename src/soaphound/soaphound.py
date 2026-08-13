@@ -5,7 +5,7 @@ from soaphound.ad.adws import ADWSConnect, NTLMAuth, KerberosAuth
 from soaphound.ad.cache_gen import (
     pull_all_ad_objects, adws_objecttype_guid_map, generate_caches,
     _generate_individual_caches, adws_object_classes, create_and_combine_soaphound_cache,
-    SOAPHOUND_LDAP_PROPERTIES, SOAPHOUND_CACHE_PROPERTIES
+    load_soaphound_cache, SOAPHOUND_LDAP_PROPERTIES, SOAPHOUND_CACHE_PROPERTIES
 )
 from soaphound.ad.acls import normalize_name
 from soaphound.ad.collectors.cert_find import run_cert_find
@@ -201,52 +201,75 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     has_laps = laps_guid is not None
     has_laps2 = laps2_guid is not None
 
-    main_query = "(|(objectCategory=person)(objectClass=msDS-GroupManagedServiceAccount)(objectClass=msDS-ManagedServiceAccount)(objectCategory=computer)(objectCategory=group)(objectClass=organizationalUnit)(objectClass=domain)(objectClass=container)(objectClass=groupPolicyContainer))"
-
-    child_objects_query = "(|(objectClass=container)(objectClass=organizationalUnit)(sAMAccountType=805306369)(objectClass=group)(&(objectCategory=person)(objectClass=user)))"
-    attributes_child = [ "objectSid", "objectClass", "objectGUID", "distinguishedName", "sAMAccountName", "sAMAccountType"]
-    
-    data_child_main = pull_all_ad_objects(
-        ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
-        query=main_query, attributes=attributes_child, base_dn_override=default_dn
-    )
-    all_child_items = data_child_main.get("objects", [])
-    
-    # 4. Main collection (uses default_dn for base_dn)
-    data_container_main = pull_all_ad_objects(
-        ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
-        query=main_query, attributes=SOAPHOUND_CACHE_PROPERTIES, base_dn_override=default_dn
-    )
-    all_collected_items = data_container_main.get("objects", [])
-
-    if not all_collected_items:
-        logging.error("No objects collected (objs is empty or None)")
-        sys.exit(1)
-
-    objs = all_collected_items
-    # Normalisation des objets si besoin
-    if (isinstance(objs, list) and len(objs) == 1 and isinstance(objs[0], dict) and all(isinstance(v, list) for v in objs[0].values())):
-        objs = fix_superdict_to_list(objs[0])
-    elif isinstance(objs, dict) and all(isinstance(v, list) for v in objs.values()):
-        objs = fix_superdict_to_list(objs)
+    if options.resume_cache:
+        logging.info(f"Resuming from cache file: {options.resume_cache}")
+        try:
+            cache_data = load_soaphound_cache(options.resume_cache)
+        except (ValueError, OSError, json.JSONDecodeError) as e:
+            logging.error(f"Failed to load resume cache '{options.resume_cache}': {e}")
+            sys.exit(1)
+        cached_root_dn = cache_data.get("domain_root_dn")
+        if cached_root_dn and cached_root_dn.lower() != default_dn.lower():
+            logging.warning(
+                f"Cache file was built for domain root '{cached_root_dn}' but the "
+                f"current target is '{default_dn}'. Proceeding anyway, but the loaded "
+                "data may not match the queried domain."
+            )
+        objs = cache_data["objs"]
+        all_child_items = cache_data["all_child_items"]
+        id_to_type_cache = cache_data["id_to_type_cache"]
+        value_to_id_cache = cache_data["value_to_id_cache"]
+        logging.info(
+            f"Loaded {len(objs)} object(s) and {len(all_child_items)} child object(s) "
+            "from cache -- skipping the initial full-domain ADWS collection."
+        )
     else:
-        if not objs or not isinstance(objs, list) or not isinstance(objs[0], dict):
-            logging.error("Something went wrong with object collected")
+        main_query = "(|(objectCategory=person)(objectClass=msDS-GroupManagedServiceAccount)(objectClass=msDS-ManagedServiceAccount)(objectCategory=computer)(objectCategory=group)(objectClass=organizationalUnit)(objectClass=domain)(objectClass=container)(objectClass=groupPolicyContainer))"
+
+        child_objects_query = "(|(objectClass=container)(objectClass=organizationalUnit)(sAMAccountType=805306369)(objectClass=group)(&(objectCategory=person)(objectClass=user)))"
+        attributes_child = [ "objectSid", "objectClass", "objectGUID", "distinguishedName", "sAMAccountName", "sAMAccountType"]
+
+        data_child_main = pull_all_ad_objects(
+            ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
+            query=main_query, attributes=attributes_child, base_dn_override=default_dn
+        )
+        all_child_items = data_child_main.get("objects", [])
+
+        # 4. Main collection (uses default_dn for base_dn)
+        data_container_main = pull_all_ad_objects(
+            ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
+            query=main_query, attributes=SOAPHOUND_CACHE_PROPERTIES, base_dn_override=default_dn
+        )
+        all_collected_items = data_container_main.get("objects", [])
+
+        if not all_collected_items:
+            logging.error("No objects collected (objs is empty or None)")
             sys.exit(1)
 
-    for obj in objs:
-        dn = obj.get('distinguishedName')
-        if isinstance(dn, list):
-            obj['distinguishedName'] = dn[0] if dn else ""
-        oc = obj.get('objectClass')
-        if isinstance(oc, str):
-            obj['objectClass'] = [oc]
-        elif oc is None:
-            obj['objectClass'] = []
+        objs = all_collected_items
+        # Normalisation des objets si besoin
+        if (isinstance(objs, list) and len(objs) == 1 and isinstance(objs[0], dict) and all(isinstance(v, list) for v in objs[0].values())):
+            objs = fix_superdict_to_list(objs[0])
+        elif isinstance(objs, dict) and all(isinstance(v, list) for v in objs.values()):
+            objs = fix_superdict_to_list(objs)
+        else:
+            if not objs or not isinstance(objs, list) or not isinstance(objs[0], dict):
+                logging.error("Something went wrong with object collected")
+                sys.exit(1)
 
-    # We Generate Soaphound Cache data
-    create_and_combine_soaphound_cache(objs, default_dn, output_dir=options.output_dir)
-    id_to_type_cache, value_to_id_cache = _generate_individual_caches(objs, default_dn)
+        for obj in objs:
+            dn = obj.get('distinguishedName')
+            if isinstance(dn, list):
+                obj['distinguishedName'] = dn[0] if dn else ""
+            oc = obj.get('objectClass')
+            if isinstance(oc, str):
+                obj['objectClass'] = [oc]
+            elif oc is None:
+                obj['objectClass'] = []
+
+        # We Generate Soaphound Cache data
+        create_and_combine_soaphound_cache(objs, default_dn, output_dir=options.output_dir, all_child_items=all_child_items)
+        id_to_type_cache, value_to_id_cache = _generate_individual_caches(objs, default_dn)
 
     logging.info(f"Start collecting ...")
 
