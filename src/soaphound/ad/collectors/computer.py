@@ -482,10 +482,18 @@ def format_computers(
         user_sessions = all_sessions_users.get(key, [])
         sessions_results = []
         for user in user_sessions:
+            # Defensive: session entries come from two code paths with inconsistent
+            # key casing. Chemin A uses lowercase (usersid/computersid/session_type),
+            # Chemin B uses camelCase (UserSID/ComputerSID). Accept both.
+            user_sid = user.get('usersid') or user.get('UserSID')
+            computer_sid = user.get('computersid') or user.get('ComputerSID')
+            session_type = user.get('session_type') or user.get('SessionType', 2)
+            if not (user_sid and computer_sid):
+                continue
             sessions_results.append({
-                "UserSID": user['usersid'],
-                "ComputerSID": user['computersid'],
-                "SessionType": user['session_type']
+                "UserSID": user_sid,
+                "ComputerSID": computer_sid,
+                "SessionType": session_type
             })
 
         computer_bh_entry = {
