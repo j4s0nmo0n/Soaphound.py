@@ -370,7 +370,14 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
             netbios_label = options.domain.split(".")[0].upper() if options.domain else "DOMAIN"
             sid_cache = {}
             for collection_bh in (users_bh, groups_bh):
-                for item in collection_bh or []:
+                # Handle both list format and BH dict format {"data": [...], "meta": {...}}
+                if isinstance(collection_bh, dict):
+                    items = collection_bh.get("data") or []
+                else:
+                    items = collection_bh or []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
                     sid = item.get("ObjectIdentifier") or (item.get("Properties") or {}).get("objectsid")
                     props = item.get("Properties") or {}
                     sam = props.get("samaccountname")

@@ -7,7 +7,7 @@ from uuid import UUID
 from soaphound.ad.adws import ADWSConnect, NTLMAuth, KerberosAuth, ADWSAuthType
 from soaphound.ad.soap_templates import NAMESPACES
 from base64 import b64decode, b64encode
-from soaphound.ad.adws import ADWSReferralError
+from soaphound.ad.adws import ADWSError, ADWSReferralError
 from soaphound.ad.embedded_schema import EMBEDDED_OBJECTTYPE_GUID_MAP
 from impacket.ldap.ldaptypes import LDAP_SID
 
@@ -173,6 +173,14 @@ def adws_objecttype_guid_map(adws, schema_dn, follow_referrals=True) -> dict:
             e.referral_url,
         )
         return EMBEDDED_OBJECTTYPE_GUID_MAP.copy()
+    except ADWSError as e:
+        logging.warning(
+            "Schema NC query failed on this DC (%s) -- "
+            "falling back to embedded schema GUID map. Custom AD schema "
+            "extensions will not be resolved.",
+            str(e).splitlines()[0] if str(e) else type(e).__name__,
+        )
+        return EMBEDDED_OBJECTTYPE_GUID_MAP.copy()
     
     if et_classes is not None:
         for item in et_classes.findall(".//ns1:classSchema", NAMESPACES):
@@ -200,6 +208,15 @@ def adws_objecttype_guid_map(adws, schema_dn, follow_referrals=True) -> dict:
             "AttributeSchema NC unavailable on queried DC (referral to %s) -- "
             "merging current mapping with embedded schema GUID map.",
             e.referral_url,
+        )
+        for k, v in EMBEDDED_OBJECTTYPE_GUID_MAP.items():
+            mapping.setdefault(k, v)
+        return mapping
+    except ADWSError as e:
+        logging.warning(
+            "AttributeSchema NC query failed on this DC (%s) -- "
+            "merging current mapping with embedded schema GUID map.",
+            str(e).splitlines()[0] if str(e) else type(e).__name__,
         )
         for k, v in EMBEDDED_OBJECTTYPE_GUID_MAP.items():
             mapping.setdefault(k, v)
@@ -350,6 +367,13 @@ def adws_object_classes(adws) -> set:
             "Schema NC unavailable for object class enumeration (referral to %s) -- "
             "falling back to object classes derived from the embedded schema map.",
             e.referral_url,
+        )
+        return set(EMBEDDED_OBJECTTYPE_GUID_MAP.keys())
+    except ADWSError as e:
+        logging.warning(
+            "Schema NC query failed for object class enumeration (%s) -- "
+            "falling back to object classes derived from the embedded schema map.",
+            str(e).splitlines()[0] if str(e) else type(e).__name__,
         )
         return set(EMBEDDED_OBJECTTYPE_GUID_MAP.keys())
     if et is None:
