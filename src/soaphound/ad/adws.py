@@ -570,18 +570,38 @@ class ADWSConnect:
             raise NotImplementedError("Pull is only supported on 'pull' (Enumeration) clients")
         
         logging.debug(f"Starting pull: query='{query}', base_dn='{base_object_dn_for_soap}', attributes={len(attributes)}")
-        
-        try:
+
+        def _do_query_enumeration():
             if use_schema:
-                enum_ctx = self._query_enumeration(
+                return self._query_enumeration(
                     remoteName=self._fqdn, nmf=self._nmf, query=query,
                     attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap, use_schema=True
                 )
-            else:
-                enum_ctx = self._query_enumeration(
-                    remoteName=self._fqdn, nmf=self._nmf, query=query,
-                    attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap
+            return self._query_enumeration(
+                remoteName=self._fqdn, nmf=self._nmf, query=query,
+                attributes=attributes, base_object_dn_for_soap=base_object_dn_for_soap
+            )
+
+        try:
+            try:
+                enum_ctx = _do_query_enumeration()
+            except (ConnectionError, OSError) as conn_err:
+                # The long-lived ADWS/NMF session can be dropped by the DC
+                # (idle timeout, load balancer, etc.) between pulls. Reconnect
+                # once and retry the same query before giving up.
+                logging.warning(
+                    f"ADWS connection to {self._fqdn} was closed ({conn_err}). "
+                    "Reconnecting and retrying the query once..."
                 )
+                try:
+                    self._nmf = self._connect(self._fqdn, self._resource)
+                    enum_ctx = _do_query_enumeration()
+                except (ConnectionError, OSError) as retry_err:
+                    logging.error(f"ADWS query to {self._fqdn} still failing after reconnect: {retry_err}")
+                    return None
+                except Exception as reconnect_error:
+                    logging.error(f"Failed to reconnect to {self._fqdn}: {reconnect_error}")
+                    return None
         except ADWSReferralError as e:
             if not follow_referrals:
                 logging.warning(f"Referral detected but follow_referrals=False. Skipping.")
@@ -635,9 +655,20 @@ class ADWSConnect:
             batches_processed += 1
             logging.debug(f"Pulling batch {batches_processed}...")
 
-            batch_xml_response_et, more_results_expected = self._pull_results(
-                remoteName=self._fqdn, nmf=self._nmf, enum_ctx=enum_ctx
-            )
+            try:
+                batch_xml_response_et, more_results_expected = self._pull_results(
+                    remoteName=self._fqdn, nmf=self._nmf, enum_ctx=enum_ctx
+                )
+            except (ConnectionError, OSError) as conn_err:
+                # The enumeration context lives server-side and is tied to
+                # this connection, so a dropped socket here can't be resumed
+                # by reconnecting. Stop paginating and return what we have.
+                logging.error(
+                    f"ADWS connection to {self._fqdn} was closed while pulling batch "
+                    f"{batches_processed} ({conn_err}). Returning {total_items_in_all_batches} "
+                    "item(s) collected so far."
+                )
+                break
 
             if batch_xml_response_et is None:
                 consecutive_failures += 1
