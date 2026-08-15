@@ -576,21 +576,33 @@ def _looks_like_certsrv(resp: dict) -> bool:
 
 
 def _http_web_enrollment_enabled(resp: dict) -> bool:
-    """Return True only when Web Enrollment is confirmed over cleartext HTTP.
+    """Return True when Web Enrollment is enabled over cleartext HTTP.
 
-    Certipy is conservative here: a bare HTTP 401/403 on `/certsrv/`, especially
-    with an empty body, is not enough to claim ESC8 over HTTP. IIS may challenge
-    before returning an SSL-required page, or the request may be routed through
-    a hardened binding. To avoid false positives, HTTP is considered enabled only
-    when the cleartext response body actually contains AD CS Web Enrollment
-    markers and the response is not an SSL-required page or redirect to HTTPS.
+    Detection strategy aligned on Certipy find.py behaviour:
+
+      - A 200 response whose body contains AD CS markers is a direct match.
+      - A 401/403 response on `/certsrv/` with a `WWW-Authenticate` header
+        advertising NTLM or Negotiate is treated as enabled: the endpoint
+        exists and requires Windows Authentication (the typical IIS
+        configuration for AD CS Web Enrollment). Body is often empty in
+        this case because IIS challenges before rendering anything.
+
+    A body-marker check is kept as a fallback for older/customised IIS
+    setups that return HTML content on unauthenticated requests.
+
+    Cases explicitly excluded (kept from previous strict behaviour):
+      - The response is a redirect (30x) - probably http->https.
+      - The response looks like an "SSL required" IIS page.
+      - The final URL ended up on HTTPS after following redirects.
     """
     if not resp.get("reachable"):
         return False
 
     status = resp.get("status")
     final_url = (resp.get("final_url") or "").lower()
+    source_url = (resp.get("source_url") or "").lower()
     body = resp.get("body") or ""
+    hit_certsrv = "/certsrv" in final_url or "/certsrv" in source_url
 
     if final_url.startswith("https://"):
         return False
@@ -599,7 +611,22 @@ def _http_web_enrollment_enabled(resp: dict) -> bool:
     if _looks_like_ssl_required(resp):
         return False
 
-    # Strict confirmation: do not rely on the requested /certsrv/ URL alone.
+    # 200 with markers - direct/highest confidence
+    if status == 200 and _body_contains_certsrv_markers(body):
+        return True
+
+    # 401/403 on /certsrv/ with NTLM/Negotiate challenge = auth-required Web Enrollment
+    # This is the Certipy-aligned behaviour: IIS with Windows Authentication enforced
+    # will challenge before rendering the page body, so the marker fallback misses it.
+    if status in (401, 403) and hit_certsrv:
+        auth_headers = [
+            v.lower()
+            for v in _response_header_values(resp, "www-authenticate")
+        ]
+        if any("ntlm" in v or "negotiate" in v for v in auth_headers):
+            return True
+
+    # Fallback: body markers on any acceptable status
     if status in (200, 401, 403) and _body_contains_certsrv_markers(body):
         return True
 
@@ -761,6 +788,20 @@ def evaluate_ca(ca: dict, sid_to_name: dict[str, str], user_sids: set[str]) -> N
             "which can be abused for privilege escalation if any template allows client authentication."
         )
 
+    # ESC11 - ICPR NTLM relay when encrypted RPC is not enforced.
+    # Aligned on Certipy find.py: when IF_ENFORCEENCRYPTICERTREQUEST is not
+    # set on the CA InterfaceFlags, an attacker who can coerce NTLM auth
+    # from a privileged principal can relay it to the ICPR RPC endpoint
+    # (MS-WCCE) and enroll certificates on the coerced principal's behalf.
+    # This is the RPC analogue of ESC8.
+    if ca.get("enforce_encrypt_icertrequest") is False:
+        vulnerabilities["ESC11"] = (
+            "IF_ENFORCEENCRYPTICERTREQUEST is not set on the CA "
+            "InterfaceFlags. An attacker may relay NTLM authentication to "
+            "the ICPR RPC endpoint (MS-WCCE) and enroll certificates on "
+            "behalf of the coerced principal."
+        )
+
     ntsd_bytes = ca.get("nTSecurityDescriptor")
     if isinstance(ntsd_bytes, bytes):
         ca_acl = _parse_ca_acl(ntsd_bytes)
@@ -778,6 +819,37 @@ def evaluate_ca(ca: dict, sid_to_name: dict[str, str], user_sids: set[str]) -> N
             vulnerabilities["ESC7"] = (
                 f"Current user has dangerous rights on the CA object "
                 f"({', '.join(principals)})."
+            )
+
+        # ESC7 (informational) - Non-privileged principals with CA Officer
+        # rights, aligned on Certipy behaviour. Domain Admins, Enterprise
+        # Admins and Local Administrators are excluded as they trivially
+        # already control the environment; anyone else who holds Manage CA
+        # or Manage Certificates is a lateral-movement target: compromising
+        # them yields full CA control.
+        DA_RID = "-512"
+        EA_RID = "-519"
+        BUILTIN_ADMINS = "S-1-5-32-544"
+
+        def _is_notoriously_privileged(sid: str) -> bool:
+            if sid == BUILTIN_ADMINS:
+                return True
+            if sid.startswith("S-1-5-21-") and (sid.endswith(DA_RID) or sid.endswith(EA_RID)):
+                return True
+            return False
+
+        officers = (
+            ca_acl.get("manage_ca_sids", set())
+            | ca_acl.get("manage_certificates_sids", set())
+            | ca_acl.get("genericall_sids", set())
+        )
+        non_priv_officers = {sid for sid in officers if not _is_notoriously_privileged(sid)}
+        if non_priv_officers and "ESC7" not in vulnerabilities:
+            officer_names = sorted(_resolve_names(non_priv_officers, sid_to_name))
+            remarks["ESC7"] = (
+                f"Non-privileged principals hold CA Officer/Admin rights "
+                f"({', '.join(officer_names)}). Compromising any of them "
+                f"grants full CA control. Aligned on Certipy find.py behaviour."
             )
 
 
@@ -1680,6 +1752,24 @@ def evaluate_template(template: dict, sid_to_name: dict[str, str], user_sids: se
         if template["enrollee_supplies_subject"] and template["schema_version"] == 1:
             vulnerabilities["ESC15"] = "Enrollee supplies subject and schema version is 1."
             remarks["ESC15"] = "Only applicable if the environment has not been patched. See CVE-2024-49019 or the wiki for more details."
+            # ESC17 - schema v1 templates with enrollee-supplied subject AND a
+            # smart-card / client-authentication capable EKU can be enrolled
+            # by any principal with enrollment rights to impersonate an
+            # arbitrary account without touching CVE-2024-49019 (EKUwu).
+            # Aligned on Certipy find.py behaviour.
+            template_ekus = set(template.get("extended_key_usage") or [])
+            if template_ekus & CLIENT_AUTH_EKUS:
+                sensitive_eku_names = sorted(
+                    OID_FRIENDLY_NAMES.get(eku, eku)
+                    for eku in (template_ekus & CLIENT_AUTH_EKUS)
+                )
+                vulnerabilities["ESC17"] = (
+                    "Enrollee supplies subject, schema version is 1, and template "
+                    "exposes authentication EKU(s): "
+                    + ", ".join(sensitive_eku_names)
+                    + ". A principal with enrollment rights can request a "
+                    "certificate for an arbitrary target account."
+                )
 
     if user_is_owner:
         vulnerabilities["ESC4"] = "Template is owned by user."
