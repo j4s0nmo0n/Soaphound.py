@@ -66,3 +66,8 @@ resolve_sids_in_log.py
 [0-9]*_containers.json
 [0-9]*_gpos.json
 [0-9]*_domains.json
+
+# Test/mission output artifacts
+*_Soaphound_CertFind.json
+*_Soaphound_CertFind.txt
+Cache.json
