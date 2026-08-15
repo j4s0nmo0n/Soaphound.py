@@ -1,6 +1,6 @@
 [project]
 name = "soaphound-py"
-version = "1.1.1"
+version = "1.1.2"
 description = "BloodHound ingestor using ADWS (Active Directory Web Services), with Kerberos support. Official PyPI package maintained by @j4s0nmo0n."
 authors = [
     {name = "@belettet1m0ree"},
