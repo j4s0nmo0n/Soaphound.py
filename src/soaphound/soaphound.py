@@ -28,7 +28,7 @@ def export_bloodhound_json(data, output_path):
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(clean_bytes(data), f, indent=2)
+        json.dump(clean_bytes(data), f, indent=2, ensure_ascii=False)
 
 def safe_export_bloodhound_json(data, output_path):
     if "meta" in data and data["meta"].get("count", 0) > 0:

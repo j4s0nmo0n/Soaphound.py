@@ -63,7 +63,7 @@ class OutputWorker(object):
                 if current_num_computers != 0:
                     computers_out.write(',')
                 try:
-                    encoded_computer = json.dumps(data, indent=indent_level)
+                    encoded_computer = json.dumps(data, indent=indent_level, ensure_ascii=False)
                     computers_out.write(encoded_computer)
                 except TypeError:
                     logging.error('Data error {0}, could not convert data to json'.format(repr(data)))
@@ -125,7 +125,7 @@ class OutputWorker(object):
             if current_num_members != 0:
                 membership_out.write(',')
             try:
-                encoded_member = json.dumps(data, indent=indent_level)
+                encoded_member = json.dumps(data, indent=indent_level, ensure_ascii=False)
                 membership_out.write(encoded_member)
             except TypeError:
                 logging.error('Data error {0}, could not convert data to json'.format(repr(data)))
