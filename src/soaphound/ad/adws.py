@@ -656,7 +656,7 @@ class ADWSConnect:
             logging.debug(f"Pulling batch {batches_processed}...")
 
             try:
-                batch_xml_response_et, more_results_expected = self._pull_results(
+                batch_xml_response_et, batch_more_results = self._pull_results(
                     remoteName=self._fqdn, nmf=self._nmf, enum_ctx=enum_ctx
                 )
             except (ConnectionError, OSError) as conn_err:
@@ -679,6 +679,9 @@ class ADWSConnect:
                     break
                 continue
             
+            # Batch succeeded - now trust the server signal about pagination
+            more_results_expected = batch_more_results
+
             # Reset counter on success
             consecutive_failures = 0
 
