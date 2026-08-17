@@ -189,7 +189,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
             output_dir=options.output_dir,
             web_probe_force_epa=force_epa,
             web_probe_enabled=not getattr(options, "cert_find_skip_web_probe", False),
-            ca_rpc_enabled=getattr(options, "cert_find_ca_rpc", False),
+            ca_rpc_enabled=not getattr(options, "cert_find_skip_ca_rpc", False),
         )
         return
 

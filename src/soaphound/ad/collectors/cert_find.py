@@ -621,7 +621,7 @@ def _http_web_enrollment_enabled(resp: dict) -> bool:
     if status in (401, 403) and hit_certsrv:
         auth_headers = [
             v.lower()
-            for v in _response_header_values(resp, "www-authenticate")
+            for v in _get_header_values(resp, "www-authenticate")
         ]
         if any("ntlm" in v or "negotiate" in v for v in auth_headers):
             return True
@@ -2065,7 +2065,7 @@ def run_cert_find(
             ip=adws_target, domain=target_domain, username=username, auth=auth, cas=cas,
         )
     else:
-        logging.info("Skipping CA-RPC configuration enrichment. Use --cert-find-ca-rpc to enable it.")
+        logging.warning("Skipping CA-RPC configuration enrichment (--cert-find-skip-ca-rpc). ESC6 and ESC11 detection will not be reliable without registry data.")
 
     logging.info("Finding issuance policies")
     oids = collect_issuance_policies(

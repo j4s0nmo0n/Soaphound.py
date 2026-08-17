@@ -113,9 +113,14 @@ def gen_cli_args():
     )
 
     coopts.add_argument(
+        "--cert-find-skip-ca-rpc",
+        action="store_true",
+        help="Skip Remote Registry/RPC enrichment of CA configuration. By default the RPC lookup is attempted so that vulnerabilities requiring registry values (ESC6, ESC11, RequestDisposition) can be detected. Use this to reduce network noise or when RPC is filtered."
+    )
+    coopts.add_argument(
         "--cert-find-ca-rpc",
         action="store_true",
-        help="Enrich CA configuration through Remote Registry/RPC (User Specified SAN, Request Disposition, Enforce Encryption, Active Policy)."
+        help=argparse.SUPPRESS,  # Deprecated: RPC enrichment is now on by default.
     )
 
     if len(sys.argv) == 1:
