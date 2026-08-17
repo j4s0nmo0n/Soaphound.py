@@ -115,7 +115,7 @@ def trust_to_bh_output(trust_obj):
         is_transitive = not has_flag(flags, 'NON_TRANSITIVE')
 
     # Get string representation for TrustType
-    trusttype_out = TRUST_TYPE_MAP.get(trust_obj.get("trustType", 0), "ParentChild")
+    trusttype_out = trusttype
 
     secid_raw = trust_obj.get('securityIdentifier')
     try:
