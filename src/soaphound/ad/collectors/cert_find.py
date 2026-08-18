@@ -1752,24 +1752,18 @@ def evaluate_template(template: dict, sid_to_name: dict[str, str], user_sids: se
         if template["enrollee_supplies_subject"] and template["schema_version"] == 1:
             vulnerabilities["ESC15"] = "Enrollee supplies subject and schema version is 1."
             remarks["ESC15"] = "Only applicable if the environment has not been patched. See CVE-2024-49019 or the wiki for more details."
-            # ESC17 - schema v1 templates with enrollee-supplied subject AND a
-            # smart-card / client-authentication capable EKU can be enrolled
-            # by any principal with enrollment rights to impersonate an
-            # arbitrary account without touching CVE-2024-49019 (EKUwu).
-            # Aligned on Certipy find.py behaviour.
-            template_ekus = set(template.get("extended_key_usage") or [])
-            if template_ekus & CLIENT_AUTH_EKUS:
-                sensitive_eku_names = sorted(
-                    OID_FRIENDLY_NAMES.get(eku, eku)
-                    for eku in (template_ekus & CLIENT_AUTH_EKUS)
-                )
-                vulnerabilities["ESC17"] = (
-                    "Enrollee supplies subject, schema version is 1, and template "
-                    "exposes authentication EKU(s): "
-                    + ", ".join(sensitive_eku_names)
-                    + ". A principal with enrollment rights can request a "
-                    "certificate for an arbitrary target account."
-                )
+            # ESC17 - Certipy 5+ flags any schema v1 template with
+            # enrollee-supplied subject as ESC17, regardless of the
+            # template's own EKUs. The vulnerability manifests through
+            # Application Policies injection in the CSR (an attacker
+            # can override the template EKU with Client Authentication,
+            # Certificate Request Agent, or Code Signing at request time).
+            vulnerabilities["ESC17"] = (
+                "Schema v1 template allows enrollee-supplied subject. "
+                "Attacker can inject arbitrary Application Policies in the CSR "
+                "to obtain a client-authentication capable certificate targeting "
+                "an arbitrary account."
+            )
 
     if user_is_owner:
         vulnerabilities["ESC4"] = "Template is owned by user."
