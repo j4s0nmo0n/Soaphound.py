@@ -1788,12 +1788,17 @@ def evaluate_template(template: dict, sid_to_name: dict[str, str], user_sids: se
         CRA_OID = "1.3.6.1.4.1.311.20.2.1"
         has_cra = CRA_OID in app_policies_oids
 
-        # ESC2 Target
-        if schema_version == 1 or (
+        # ESC2 Target - aligned strictly on Certipy find.py: only flag
+        # templates whose EKU set actually enables ESC2 exploitation
+        # (Any Purpose EKU present, or v2+ template requiring a signature
+        # with the Any Purpose application policy). Do NOT flag every
+        # schema-v1 template as previously - that was noise (all legacy
+        # templates got flagged), diverging from Certipy behaviour.
+        if template["any_purpose"] or (
             schema_version > 1 and sig_required > 0 and has_any_purpose
         ):
-            if schema_version == 1:
-                reason = "has schema version 1"
+            if template["any_purpose"]:
+                reason = "has the Any Purpose EKU"
             else:
                 reason = "requires a signature with the Any Purpose application policy"
             remarks["ESC2 Target Template"] = (
@@ -1801,12 +1806,15 @@ def evaluate_template(template: dict, sid_to_name: dict[str, str], user_sids: se
                 f"vulnerability by itself. See the wiki for more details. Template {reason}."
             )
 
-        # ESC3 Target
-        if schema_version == 1 or (
+        # ESC3 Target - same rationale as ESC2 Target above. Only flag
+        # templates whose EKU set actually enables the ESC3 chain
+        # (Certificate Request Agent EKU present, or v2+ template
+        # requiring a signature with the CRA application policy).
+        if template["enrollment_agent"] or (
             schema_version > 1 and sig_required > 0 and has_cra
         ):
-            if schema_version == 1:
-                reason = "has schema version 1"
+            if template["enrollment_agent"]:
+                reason = "has the Certificate Request Agent EKU"
             else:
                 reason = "requires a signature with the Certificate Request Agent application policy"
             remarks["ESC3 Target Template"] = (
