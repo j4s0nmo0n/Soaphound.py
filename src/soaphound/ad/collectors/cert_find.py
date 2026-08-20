@@ -1931,12 +1931,12 @@ def build_output(templates: list[dict], cas: list[dict], oids: list[dict], domai
     template_entries = OrderedDict()
     for idx, tpl in enumerate(templates):
         entry = OrderedDict()
-        # Prefer displayName (human-readable, matches certtmpl.msc and Certipy
-        # output) with name/cn as fallback for templates missing displayName.
-        entry["Template Name"] = tpl.get("displayName") or tpl.get("name") or tpl.get("cn")
-        # Keep the raw cn/name in a dedicated field so scripts and Certipy req
-        # commands can still reference the technical identifier used in DNs.
-        entry["Template CN"] = tpl.get("name") or tpl.get("cn")
+        # Certipy convention (find.py:1534): Template Name is the LDAP cn
+        # (technical identifier used in DNs and by `certipy req -template`),
+        # Display Name is the human-readable label from displayName.
+        # We match this 1:1 for interop with certipy-based workflows.
+        entry["Template Name"] = tpl.get("cn") or tpl.get("name")
+        entry["Display Name"] = tpl.get("displayName") or tpl.get("cn") or tpl.get("name")
         if tpl.get("cas"):
             entry["Certificate Authorities"] = tpl.get("cas", [])
         entry["Enabled"] = bool(tpl.get("enabled", False))
