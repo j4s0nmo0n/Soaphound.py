@@ -5,6 +5,19 @@ All notable changes to Soaphound-py will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-08-20
+
+### Removed
+- **packaging**: The `[shadowcred]` optional dependency group is removed
+  from `pyproject.toml`. `dsinternals` was declared as an optional dep
+  but is not imported anywhere in the Soaphound.py codebase. Soaphound.py
+  is a BloodHound collector; shadow credentials operations belong to
+  offensive tooling like SOAPy and are not implemented here. The
+  corresponding install instruction (`pipx install
+  "soaphound-py[shadowcred] @ ..."`) is removed from the README. Users
+  who tried it got a functional install but no additional feature -
+  removing the extras group avoids the confusion.
+
 ## [1.2.0] - 2026-08-20
 
 ### Added
