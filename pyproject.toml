@@ -33,9 +33,6 @@ dependencies = [
     "setuptools>=65.0",
 ]
 
-[project.optional-dependencies]
-shadowcred = ["dsinternals>=1.2.4"]
-
 [project.scripts]
 soaphound = "soaphound.soaphound:main"
 

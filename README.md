@@ -104,12 +104,6 @@ pipx install git+https://github.com/j4s0nmo0n/Soaphound.py
 soaphound --help
 ```
 
-With Shadow Credentials support (optional `dsinternals` dependency):
-
-```bash
-pipx install "soaphound-py[shadowcred] @ git+https://github.com/j4s0nmo0n/Soaphound.py"
-```
-
 ## With `poetry` (development)
 
 ```bash
