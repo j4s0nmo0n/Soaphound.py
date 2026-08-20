@@ -15,7 +15,7 @@ from soaphound.ad.collectors.gpo import collect_gpos, format_gpos
 from soaphound.ad.collectors.ou import collect_ous, format_ous
 from soaphound.ad.collectors.group import collect_groups, format_groups
 from soaphound.ad.collectors.user import collect_users, format_users
-from soaphound.ad.collectors.trust import collect_trusts, trust_to_bh_output
+from soaphound.ad.collectors.trust import collect_trusts, trust_to_bh_output, trust_to_audit_output, collect_forest_trusts
 
 from soaphound.lib.utils import ObjectCache, DNSCache
 from soaphound.lib.authentication import ADAuthentication
@@ -286,6 +286,45 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 
     
     print("Number of trusts collected:", len(trusts))
+
+    # Trust audit report (if --trust-audit is set)
+    # This performs a FOREST-WIDE trust enumeration: each domain in the forest
+    # is queried for its TDOs, so both sides of each trust are analyzed. The BH
+    # output above is unchanged - it still contains only the connected domain's
+    # trusts, as expected by BloodHound.
+    if getattr(options, 'trust_audit', False):
+        try:
+            forest_trusts = collect_forest_trusts(
+                ip=options.domain_controller,
+                domain=options.domain,
+                username=options.username,
+                auth=auth,
+                naming_contexts=naming_contexts,
+                config_nc=config_dn,
+                schema_nc=schema_dn,
+                domain_sid=domain_sid,
+            )
+            if forest_trusts:
+                from soaphound.ad.trust_audit_report import generate_trust_audit_report
+                audit_trusts = [trust_to_audit_output(t) for t in forest_trusts]
+                # Preserve source domain tagging for the report
+                for at, ft in zip(audit_trusts, forest_trusts):
+                    at['_source_domain_name'] = ft.get('source_domain_name', '')
+                    at['_source_domain_dn'] = ft.get('source_domain_dn', '')
+                report_path = generate_trust_audit_report(
+                    audit_trusts,
+                    domain_name=options.domain,
+                    output_dir=options.output_dir,
+                    prefix=getattr(options, 'outputprefix', None),
+                )
+                print(f"[+] Trust audit report saved: {report_path}")
+            else:
+                print("[!] No trusts found in the forest; audit report skipped")
+        except Exception as _e:
+            import traceback
+            print(f"[!] Trust audit report generation failed: {_e}")
+            traceback.print_exc()
+
     # --- (4) Format domains, inject trusts ---
     domains_bh = format_domains(
     raw_domains, options.domain, default_dn,

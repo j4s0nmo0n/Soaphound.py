@@ -98,6 +98,11 @@ def gen_cli_args():
         action="store_true",
         help="Enumerate AD CS certificate templates and CAs like certipy find."
     )
+    coopts.add_argument(
+        "--trust-audit",
+        action="store_true",
+        help="Audit AD trusts: decode trustAttributes flags per Sandker's rules (transitivity, SID filtering mode, TGT delegation, authentication level) and detect misconfigurations (intra-forest SID filter disabled, TREAT_AS_EXTERNAL relaxation, cross-forest TGT delegation, PIM trust, one-way trust reversibility per Almond). Generates <timestamp>_trusts_audit.txt in the output dir."
+    )
 
     coopts.add_argument(
         "--cert-find-force-epa",
