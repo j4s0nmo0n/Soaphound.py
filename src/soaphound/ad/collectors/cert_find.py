@@ -23,6 +23,10 @@ from soaphound.ad.acls import (
 from soaphound.ad.cache_gen import filetime_to_unix, pull_all_ad_objects
 from soaphound.lib.utils import ADUtils
 
+# Suppress InsecureRequestWarning: CA has self-signed cert, verify=False is required for probing
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 try:
     import requests
 except Exception:
