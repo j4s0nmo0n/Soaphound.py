@@ -88,6 +88,7 @@ def gen_cli_args():
                         '--worker_num',
                         metavar='NUM_WORKERS',
                         action='store',
+                        type=int,
                         default=100,
                         help='Number of workers, default 100')
 
