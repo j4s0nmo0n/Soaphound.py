@@ -104,7 +104,7 @@ def get_child_objects_adws(parent_dn, data_child_main):
 
 
 
-def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value_to_id_cache, data_child_main, objecttype_guid_map, all_trusts, domain_functionality=None):
+def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value_to_id_cache, data_child_main, objecttype_guid_map, all_trusts, domain_functionality=None, gpo_changes=None):
     formatted_domains = []
     for obj in domains:
         dn = obj.get("distinguishedName", "")
@@ -128,7 +128,7 @@ def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value
                 gpo_id = value_to_id_cache.get(dn.upper())
                 if gpo_id:
                     main_domain_gplinks.append({
-                        "IsEnforced": bool(option & 0x1),
+                        "IsEnforced": bool(option & 0x2),
                         "GUID": gpo_id.upper()
                     })
 
@@ -178,7 +178,7 @@ def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value
             "Aces": aces_domain,
             "Links": main_domain_gplinks,
             "ChildObjects": child_objects,
-            "GPOChanges": {
+            "GPOChanges": gpo_changes or {
                 "AffectedComputers": [],
                 "DcomUsers": [],
                 "LocalAdmins": [],

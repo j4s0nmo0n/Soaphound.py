@@ -11,11 +11,12 @@ from soaphound.ad.acls import normalize_name
 from soaphound.ad.collectors.cert_find import run_cert_find
 from soaphound.ad.collectors.domain import collect_domains, format_domains
 from soaphound.ad.collectors.container import collect_containers, format_containers
-from soaphound.ad.collectors.gpo import collect_gpos, format_gpos
+from soaphound.ad.collectors.gpo import collect_gpos, format_gpos, collect_wmi_filters
 from soaphound.ad.collectors.ou import collect_ous, format_ous
 from soaphound.ad.collectors.group import collect_groups, format_groups
 from soaphound.ad.collectors.user import collect_users, format_users
 from soaphound.ad.collectors.trust import collect_trusts, trust_to_bh_output, trust_to_audit_output, collect_forest_trusts
+from soaphound.ad.collectors.gpo_sysvol import connect_sysvol, collect_gpo_sysvol_changes, compute_affected_computers
 
 from soaphound.lib.utils import ObjectCache, DNSCache
 from soaphound.lib.authentication import ADAuthentication
@@ -53,7 +54,10 @@ def zip_bloodhound_jsons(output_dir, timestamp,  archive_name="BloodHound.zip"):
     archive_path = archive_name
     with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as archive:
         for fname in os.listdir(output_dir):
-            if fname.lower().endswith(".json") and fname.lower().startswith(timestamp):
+            if (fname.lower().endswith(".json")
+                    and fname.lower().startswith(timestamp)
+                    and "gpp_passwords" not in fname.lower()
+                    and "privilege_rights" not in fname.lower()):
                 fpath = os.path.join(output_dir, fname)
                 archive.write(fpath, arcname=fname)
     print(f"Zip file created at : {archive_path}")
@@ -277,7 +281,8 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 
     # Collect and format GPOs
     gpos = collect_gpos(options.domain_controller, options.domain, options.username, auth)
-    gpos_bh = format_gpos(gpos, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
+    wmi_filters = collect_wmi_filters(options.domain_controller, options.domain, options.username, auth, default_dn)
+    gpos_bh = format_gpos(gpos, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map, wmi_filters=wmi_filters)
         
 
     # Collect and format Trusts
@@ -325,13 +330,46 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
             print(f"[!] Trust audit report generation failed: {_e}")
             traceback.print_exc()
 
+    # --- (3b) Optional SYSVOL collection for GPOChanges ---
+    gpo_changes = None
+    gpp_passwords = []
+    privilege_rights = {}
+    _gpo_guids_with_changes = set()
+    sysvol_conn = connect_sysvol(options.domain_controller, options.domain, options.username, auth)
+    if sysvol_conn:
+        try:
+            import re as _re
+            _guid_pat = _re.compile(r'\{([A-F0-9\-]{36})\}', _re.IGNORECASE)
+            gpo_guids = []
+            for g in gpos_bh.get("data", []):
+                gpcpath = (g.get("Properties") or {}).get("gpcpath") or ""
+                m = _guid_pat.search(gpcpath)
+                if m:
+                    gpo_guids.append(m.group(1))
+            gpo_changes, gpp_passwords, privilege_rights, _gpo_guids_with_changes = collect_gpo_sysvol_changes(
+                sysvol_conn, options.domain, gpo_guids,
+                id_to_type_cache, value_to_id_cache
+            )
+            if gpp_passwords:
+                logging.warning("[!] GPP passwords found (%d) — saved to gpp_passwords.json", len(gpp_passwords))
+        except Exception as _exc:
+            logging.warning("SYSVOL GPOChanges collection failed: %s", _exc)
+        finally:
+            try:
+                sysvol_conn.logoff()
+            except Exception:
+                pass
+    else:
+        logging.info("SYSVOL unreachable — GPOChanges will be empty")
+
     # --- (4) Format domains, inject trusts ---
     domains_bh = format_domains(
     raw_domains, options.domain, default_dn,
     id_to_type_cache, value_to_id_cache,
-    all_child_items,   
+    all_child_items,
     objecttype_guid_map, trusts,
-    domain_functionality=domainFunctionality
+    domain_functionality=domainFunctionality,
+    gpo_changes=gpo_changes
 )
 
 
@@ -446,6 +484,18 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
             bh_rpc_context=addomain, num_workers=options.worker_num
         )
 
+    # --- AffectedComputers: resolve computers in OUs linked to GPOs with changes ---
+    if gpo_changes is not None and _gpo_guids_with_changes:
+        try:
+            affected = compute_affected_computers(
+                _gpo_guids_with_changes, ous, computers, id_to_type_cache
+            )
+            gpo_changes["AffectedComputers"] = affected
+            for d in domains_bh.get("data", []):
+                d["GPOChanges"]["AffectedComputers"] = affected
+        except Exception as _exc:
+            logging.warning("compute_affected_computers failed: %s", _exc)
+
     timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d%H%M%S') + "_"
     output_dir = options.output_dir
     safe_export_bloodhound_json(domains_bh, os.path.join(output_dir, timestamp + "domains.json"))
@@ -455,6 +505,16 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     safe_export_bloodhound_json(groups_bh, os.path.join(output_dir, timestamp + "groups.json"))
     safe_export_bloodhound_json(users_bh, os.path.join(output_dir, timestamp + "users.json"))
     safe_export_bloodhound_json(computers_bh, os.path.join(output_dir, timestamp + "computers.json"))
+
+    if gpp_passwords:
+        gpp_path = os.path.join(output_dir, timestamp + "gpp_passwords.json")
+        export_bloodhound_json({"count": len(gpp_passwords), "data": gpp_passwords}, gpp_path)
+        print(f"[!] GPP passwords saved: {gpp_path}")
+
+    if privilege_rights:
+        pr_path = os.path.join(output_dir, timestamp + "privilege_rights.json")
+        export_bloodhound_json({"domain": options.domain, "data": privilege_rights}, pr_path)
+        print(f"[+] Privilege rights saved: {pr_path}")
 
     if options.zip:
         zip_bloodhound_jsons(output_dir, timestamp, timestamp + "bloodhound.zip")

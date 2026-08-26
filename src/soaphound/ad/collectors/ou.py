@@ -30,7 +30,7 @@ def collect_ous(ip=None, domain=None, username=None, auth=None, base_dn_override
     else:
         attributes = [
             "name", "objectGUID", "objectSid", "objectClass", "distinguishedName",
-            "nTSecurityDescriptor", "whenCreated", "description", "gPLink"
+            "nTSecurityDescriptor", "whenCreated", "description", "gPLink", "gPOptions"
         ]
         query = "(objectCategory=organizationalUnit)"
         ous = pull_all_ad_objects(
@@ -105,7 +105,7 @@ def format_ous(
                 link_options = int(options_part.strip('[]'))
                 gpo_id = value_to_id_cache.get(link_dn.upper())
                 if gpo_id:
-                    ou_gplinks.append({"IsEnforced": bool(link_options & 0x1), "GUID": gpo_id.upper()})
+                    ou_gplinks.append({"IsEnforced": bool(link_options & 0x2), "GUID": gpo_id.upper()})
             except Exception as e:
                 pass
 
@@ -122,6 +122,7 @@ def format_ous(
             "distinguishedname": ou_dn_upper,
             "domainsid": main_domain_sid,
             "highvalue": False,
+            "blocksinheritance": bool(int(obj.get("gPOptions") or 0) & 1),
             "description": description,
             "whencreated": filetime_to_unix(obj.get("whenCreated")),
             "isaclprotected": is_acl_protected_ou,
