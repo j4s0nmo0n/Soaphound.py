@@ -535,9 +535,69 @@ class ADWSConnect:
                 dn_elem = item.find(".//addata:distinguishedName/ad:value", NAMESPACES)
                 dn = dn_elem.text if dn_elem is not None else "Unknown DN"
 
+    # XML Schema simple types accepted by the ADWS Resource endpoint for the
+    # xsi:type attribute on <ad:value>. Values outside this set either produce
+    # a malformed SOAP payload or get rejected server-side with
+    # AttributeTypeNotValidForEntry.
+    _PUT_ALLOWED_DATA_TYPES = frozenset({
+        "string", "boolean", "int", "integer", "long",
+        "dateTime", "base64Binary", "hexBinary",
+    })
+
     def put(self, object_ref: str, operation: str, attribute: str, data_type: str, value: str) -> bool:
+        """Write an attribute on an AD object via the ADWS Resource endpoint
+        (WS-Transfer Put).
+
+        Args:
+            object_ref: Distinguished Name of the target object.
+            operation: One of 'replace', 'add', 'delete' (lowercase, per MS-ADDM
+                section 3.1.4.1.4.1).
+            attribute: LDAP display name of the attribute to modify (e.g.
+                'description', 'servicePrincipalName').
+            data_type: XML Schema simple type name WITHOUT the 'xsd:' prefix:
+                'string', 'boolean', 'int', 'dateTime', 'base64Binary', etc.
+                The template adds the 'xsd:' prefix automatically.
+            value: String form of the value to write.
+
+        Returns:
+            True on success (empty <Body> or <wxf:PutResponse> in reply),
+            False otherwise.
+
+        Raises:
+            ValueError: when ``data_type`` is not one of the supported XSD
+                simple types (see ``_PUT_ALLOWED_DATA_TYPES``).
+            NotImplementedError: when called on a non-Resource client.
+
+        Example:
+            auth = NTLMAuth(password="...")
+            client = ADWSConnect.put_client(ip, domain, username, auth)
+            ok = client.put(
+                object_ref="CN=canary,OU=Users,DC=example,DC=local",
+                operation="replace",
+                attribute="description",
+                data_type="string",      # NOT "xsd:string"
+                value="updated by soaphound",
+            )
+        """
         if self._resource != "Resource":
             raise NotImplementedError("Put is only supported on 'put' (Resource) clients")
+
+        # Normalise data_type: strip a legacy 'xsd:' prefix (callers sometimes
+        # pass it because that is how the type appears on the wire), then
+        # validate against the allow-list. The SOAP template at
+        # soap_templates.py:LDAP_PUT_FSTRING already injects the 'xsd:' prefix
+        # into xsi:type, so a prefixed input would otherwise produce
+        # xsi:type="xsd:xsd:string" and the server rejects the write with
+        # AttributeTypeNotValidForEntry.
+        if isinstance(data_type, str) and data_type.startswith("xsd:"):
+            logging.warning("data_type with 'xsd:' prefix is deprecated, strip it")
+            data_type = data_type[len("xsd:"):]
+        if data_type not in self._PUT_ALLOWED_DATA_TYPES:
+            raise ValueError(
+                f"Unsupported data_type: {data_type!r} "
+                f"(expected one of: {sorted(self._PUT_ALLOWED_DATA_TYPES)})"
+            )
+
         put_vars = {
             "object_ref": object_ref, "uuid": str(uuid4()), "fqdn": self._fqdn,
             "operation": operation, "attribute": attribute,

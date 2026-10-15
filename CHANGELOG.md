@@ -5,6 +5,15 @@ All notable changes to Soaphound-py will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **adws**: ADWSConnect.put() now validates data_type and strips a legacy
+  'xsd:' prefix if present (with a WARNING log). Supported types are
+  documented in the docstring. Previously, passing 'xsd:string' produced
+  a malformed xsi:type and the server rejected the write with
+  AttributeTypeNotValidForEntry.
+
 ## [1.2.1] - 2026-08-20
 
 ### Removed
