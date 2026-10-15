@@ -26,6 +26,9 @@ from .soap_templates import (
     LDAP_QUERY_FSTRING,
     NAMESPACES,
     LDAP_ROOT_DSE_FSTRING,
+    TM_GET_AD_FOREST_FSTRING,
+    TM_TRANSLATE_NAME_FSTRING,
+    TM_CHANGE_OPTIONAL_FEATURE_FSTRING,
 )
 
 # --- Enums and Constants ---
@@ -781,11 +784,124 @@ class ADWSConnect:
     @classmethod
     def create_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:
         raise NotImplementedError()
-    
+
     @classmethod
     def accounts_cap_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:
         raise NotImplementedError()
-    
+
     @classmethod
     def topology_cap_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:
-        raise NotImplementedError()
+        """Open an MS-ADCAP TopologyManagement capability session on the DC.
+
+        The ADWS endpoint path is ``Windows/TopologyManagement`` (MS-ADCAP
+        section 3.2.3), served over the same net.tcp:9389 / MC-NMF framing /
+        MS-NNS NegotiateStream carrier as the Enumeration and Resource
+        endpoints. Use the resulting client's ``get_ad_forest``,
+        ``translate_name`` and ``change_optional_feature`` methods.
+        """
+        return cls(ip, domain, username, auth, "TopologyManagement")
+
+    # ------------------------------------------------------------------
+    # MS-ADCAP TopologyManagement primitives
+    # ------------------------------------------------------------------
+    # These three methods are the Linux-side counterparts to RSAT PowerShell
+    # ``Get-ADForest``, ``TranslateName`` (NTDSAPI/MS-ADCAP) and
+    # ``Enable-ADOptionalFeature``. Each method targets the server-side
+    # consolidation primitives that MS-ADCAP exposes, which is why they are
+    # interesting from a defensive-measurement angle: on SACL-tagged objects
+    # they are expected to behave differently from the LDAP read/write path
+    # observed via Event 4662. Measurement is handled in a separate prompt;
+    # here we only ship the client-side implementation.
+
+    def _tm_fault_or_tree(self, soap_payload: str):
+        """Send a TopologyManagement SOAP payload, parse the reply, and return
+        either the parsed ElementTree or an error dict when the server replied
+        with a SOAP Fault.
+
+        _handle_str_to_xml raises ADWSError on <s:Fault>, so we convert that
+        exception into a plain dict here. The MS-ADCAP primitives report
+        AccessDenied via Fault (non-privileged yuji on ChangeOptionalFeature,
+        for example) and callers want to switch on the error label rather than
+        handle exceptions.
+        """
+        self._nmf.send(soap_payload)
+        resp_str = self._nmf.recv()
+        try:
+            et = self._handle_str_to_xml(resp_str)
+        except ADWSError as exc:
+            msg = str(exc)
+            label = "AccessDenied" if "AccessDenied" in msg else (msg.splitlines()[0] if msg else "Fault")
+            return {"error": label, "detail": msg}
+        if et is None:
+            return {"error": "ParseFailure", "detail": "server reply could not be parsed as XML"}
+        return et
+
+    def _tm_require_endpoint(self) -> None:
+        if self._resource != "TopologyManagement":
+            raise NotImplementedError("TopologyManagement primitives require a 'TopologyManagement' client")
+
+    def get_ad_forest(self) -> dict:
+        """Call MS-ADCAP ``GetADForest`` for ``self._domain``.
+
+        Returns:
+            Flat dict with every child text() of the response body, or an
+            ``{"error": "...", "detail": "..."}`` dict on SOAP Fault.
+        """
+        self._tm_require_endpoint()
+        soap = TM_GET_AD_FOREST_FSTRING.format(uuid=str(uuid4()), fqdn=self._fqdn, domain=self._domain)
+        result = self._tm_fault_or_tree(soap)
+        if isinstance(result, dict):
+            return result
+        tm_ns = NAMESPACES["tm"]
+        payload = result.find(f".//{{{tm_ns}}}GetADForestResponse")
+        if payload is None:
+            payload = result.find(f".//{{{tm_ns}}}GetADForestResult")
+        if payload is None:
+            # Fallback: flatten every tm:* leaf we find under the body.
+            payload = result
+        flat: dict = {}
+        for leaf in payload.iter():
+            tag = leaf.tag.split("}", 1)[-1] if "}" in leaf.tag else leaf.tag
+            if leaf.text and leaf.text.strip():
+                flat[tag] = leaf.text.strip()
+        return flat
+
+    def translate_name(self, name: str, format_offered: int = 2, format_desired: int = 1) -> dict:
+        """Call MS-ADCAP ``TranslateName``.
+
+        Args:
+            name: input principal to translate.
+            format_offered: input format code. 2 = NameSamCompatible (default).
+            format_desired: desired output format. 1 = NameFullyQualifiedDN
+                (default).
+        """
+        self._tm_require_endpoint()
+        soap = TM_TRANSLATE_NAME_FSTRING.format(
+            uuid=str(uuid4()), fqdn=self._fqdn,
+            name=name, format_offered=int(format_offered), format_desired=int(format_desired),
+        )
+        result = self._tm_fault_or_tree(soap)
+        if isinstance(result, dict):
+            return result
+        tm_ns = NAMESPACES["tm"]
+        translated = [elem.text for elem in result.iter(f"{{{tm_ns}}}string") if elem.text]
+        return {"input": name, "format_offered": int(format_offered), "format_desired": int(format_desired), "translated": translated}
+
+    def change_optional_feature(self, feature_guid: str, enable: bool = True) -> dict:
+        """Call MS-ADCAP ``ChangeOptionalFeature``.
+
+        Args:
+            feature_guid: GUID of the optional feature (e.g. Recycle Bin).
+            enable: True to enable, False to disable.
+        """
+        self._tm_require_endpoint()
+        soap = TM_CHANGE_OPTIONAL_FEATURE_FSTRING.format(
+            uuid=str(uuid4()), fqdn=self._fqdn,
+            feature_guid=feature_guid, enable_bool=str(bool(enable)).lower(),
+        )
+        result = self._tm_fault_or_tree(soap)
+        if isinstance(result, dict):
+            return result
+        # No specific payload fields on success -- the write is confirmed by
+        # the absence of a Fault and a 2xx-equivalent empty Body.
+        return {"feature_guid": feature_guid, "enable": bool(enable), "result": "ok"}
