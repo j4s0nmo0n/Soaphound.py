@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **adws**: implement MS-ADCAP TopologyManagement endpoint and three primitives
+  (GetADForest, TranslateName, ChangeOptionalFeature). Previously the three
+  classmethods (topology_cap_client, accounts_cap_client, create_client) were
+  declared but raised NotImplementedError. accounts_cap_client and
+  create_client remain NotImplementedError for now.
+- **cli**: `--adcap-get-forest`, `--adcap-translate NAME`, `--adcap-change-feature GUID`
+  (mutually exclusive, short-circuit the BloodHound collect path; JSON output).
+
 ### Changed
 - **adws**: share a single NMF Enumeration session across all BloodHound-equivalent
   collectors. Reduces TCP:9389 connection count from N (one per collector) to 1

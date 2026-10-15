@@ -128,6 +128,35 @@ def gen_cli_args():
         help=argparse.SUPPRESS,  # Deprecated: RPC enrichment is now on by default.
     )
 
+    # MS-ADCAP TopologyManagement primitives (MS-ADCAP 3.2.4). Mutually
+    # exclusive with each other and with the BloodHound collect path:
+    # soaphound.py:main dispatches on these early and exits before touching
+    # the collectors.
+    adcap_group = parser.add_argument_group(
+        "adcap options",
+        description="MS-ADCAP TopologyManagement primitives (RSAT PowerShell equivalents).",
+    )
+    adcap_mex = adcap_group.add_mutually_exclusive_group()
+    adcap_mex.add_argument(
+        "--adcap-get-forest",
+        action="store_true",
+        help="Call MS-ADCAP GetADForest on the configured domain and print the response as JSON.",
+    )
+    adcap_mex.add_argument(
+        "--adcap-translate",
+        metavar="NAME",
+        action="store",
+        default=None,
+        help="Call MS-ADCAP TranslateName on NAME (default: offered=NameSamCompatible=2, desired=NameFullyQualifiedDN=1).",
+    )
+    adcap_mex.add_argument(
+        "--adcap-change-feature",
+        metavar="GUID",
+        action="store",
+        default=None,
+        help="Call MS-ADCAP ChangeOptionalFeature for the optional feature GUID (enables it by default).",
+    )
+
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)

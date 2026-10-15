@@ -160,6 +160,26 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 
     print(banner)
 
+    # MS-ADCAP TopologyManagement dispatch. These flags are mutually exclusive
+    # (enforced by argparse) and short-circuit the whole collect pipeline: no
+    # RootDSE, no Enumeration session, no cache, just one TopologyManagement
+    # SOAP round-trip. Keeps the measurement signature small and separates the
+    # MS-ADCAP primitives cleanly from the BloodHound collectors.
+    if getattr(options, "adcap_get_forest", False) \
+            or getattr(options, "adcap_translate", None) \
+            or getattr(options, "adcap_change_feature", None):
+        tm_client = ADWSConnect.topology_cap_client(
+            options.domain_controller, options.domain, options.username, auth,
+        )
+        if getattr(options, "adcap_get_forest", False):
+            result = tm_client.get_ad_forest()
+        elif getattr(options, "adcap_translate", None):
+            result = tm_client.translate_name(options.adcap_translate)
+        else:
+            result = tm_client.change_optional_feature(options.adcap_change_feature, enable=True)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+
     # 1. RootDSE query (Resource)
     adws_resource = ADWSConnect(options.domain_controller, options.domain, options.username, auth, "Resource")
     contexts = adws_resource.get_rootdse_contexts(adws_resource._fqdn, adws_resource._nmf)
