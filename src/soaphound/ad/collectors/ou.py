@@ -7,7 +7,7 @@ from soaphound.ad.adws import WELL_KNOWN_SIDS
 import json
 import os
 
-def collect_ous(ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
+def collect_ous(adws_pull_client=None, ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
     """
     Collect Organizational Units (OUs) from AD (live or via cache).
     """
@@ -34,6 +34,7 @@ def collect_ous(ip=None, domain=None, username=None, auth=None, base_dn_override
         ]
         query = "(objectCategory=organizationalUnit)"
         ous = pull_all_ad_objects(
+            adws_pull_client=adws_pull_client,
             ip=ip,
             domain=domain,
             username=username,

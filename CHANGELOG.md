@@ -8,12 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **adws**: share a single NMF Enumeration session across all BloodHound-equivalent
+  collectors. Reduces TCP:9389 connection count from N (one per collector) to 1
+  (plus occasional reconnects on server idle timeout). Backward-compat preserved
+  via the optional `adws_pull_client` argument on each collector; callers that
+  omit it fall back to the pre-refactor behaviour of opening a per-call session.
+  The `--cert-find` code path keeps its existing multi-session model for now
+  and is scoped out of this refactor.
 - **adws**: ADWSConnect.put() now validates data_type and strips a legacy
   'xsd:' prefix if present (with a WARNING log). Supported types are
   documented in the docstring. Previously, passing 'xsd:string' produced
   a malformed xsi:type and the server rejected the write with
   AttributeTypeNotValidForEntry.
-
 ## [1.2.1] - 2026-08-20
 
 ### Removed

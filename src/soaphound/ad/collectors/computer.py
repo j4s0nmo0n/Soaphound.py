@@ -66,6 +66,7 @@ else:
 
 
 def collect_computers(
+    adws_pull_client=None,
     ip=None,
     domain=None,
     username=None,
@@ -136,6 +137,7 @@ def collect_computers(
 
     # --- Pull via ADWS ---
     raw_objects = pull_all_ad_objects(
+        adws_pull_client=adws_pull_client,
         ip=ip,
         domain=domain,
         username=username,

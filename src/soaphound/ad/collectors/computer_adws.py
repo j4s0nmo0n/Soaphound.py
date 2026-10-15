@@ -30,6 +30,7 @@ cache_file_path = os.path.join(output_dir, "Cache.json")
 
 
 def collect_computers_adws(
+    adws_pull_client=None,
     ip=None,
     domain=None,
     username=None,
@@ -101,6 +102,7 @@ def collect_computers_adws(
 
     # --- Pull via ADWS ---
     raw_objects = pull_all_ad_objects(
+        adws_pull_client=adws_pull_client,
         ip=ip,
         domain=domain,
         username=username,

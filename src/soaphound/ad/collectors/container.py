@@ -90,7 +90,7 @@ def get_child_objects(container_dn_upper, value_to_id_cache, id_to_type_cache, B
                 })
     return children
 
-def collect_containers(ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
+def collect_containers(adws_pull_client=None, ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
     """
     If cache_file is provided, load containers from this cache without live ADWS collection.
     Otherwise, collect live via ADWS.
@@ -130,6 +130,7 @@ def collect_containers(ip=None, domain=None, username=None, auth=None, base_dn_o
         query = "(&(objectCategory=container)(objectClass=container))"
 
         containers = pull_all_ad_objects(
+            adws_pull_client=adws_pull_client,
             ip=ip,
             domain=domain,
             username=username,

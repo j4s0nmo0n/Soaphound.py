@@ -5,7 +5,7 @@ from soaphound.ad.adws import ADWSReferralError
 import json
 import base64
 
-def collect_trusts(ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None, domain_sid=None):
+def collect_trusts(adws_pull_client=None, ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None, domain_sid=None):
     """
     Collect all trustedDomain objects from the directory or a cache.
     Automatically add the 'domainsid' field to each trust if domain_sid is provided.
@@ -34,6 +34,7 @@ def collect_trusts(ip=None, domain=None, username=None, auth=None, base_dn_overr
         ]
         query = "(objectClass=trustedDomain)"
         trusts = pull_all_ad_objects(
+            adws_pull_client=adws_pull_client,
             ip=ip,
             domain=domain,
             username=username,
@@ -499,8 +500,8 @@ def _nc_to_domain_name(nc):
     return ".".join(parts).lower()
 
 
-def collect_forest_trusts(ip, domain, username, auth, naming_contexts,
-                          config_nc, schema_nc, domain_sid=None):
+def collect_forest_trusts(adws_pull_client=None, ip=None, domain=None, username=None, auth=None, naming_contexts=None,
+                          config_nc=None, schema_nc=None, domain_sid=None):
     """Collect trustedDomain objects from every domain NC in the forest.
 
     Args:
@@ -547,7 +548,13 @@ def collect_forest_trusts(ip, domain, username, auth, naming_contexts,
                 'addata': "http://schemas.microsoft.com/2008/1/ActiveDirectory/Data",
                 'ad': "http://schemas.microsoft.com/2008/1/ActiveDirectory",
             }
-            pull_client = ADWSConnect.pull_client(ip, domain, username, auth)
+            # Reuse the shared Enumeration session when supplied; fall back to a
+            # dedicated one so standalone callers of collect_forest_trusts keep
+            # working as before.
+            if adws_pull_client is not None:
+                pull_client = adws_pull_client
+            else:
+                pull_client = ADWSConnect.pull_client(ip, domain, username, auth)
             et = pull_client.pull(
                 query="(objectClass=crossRef)",
                 attributes=["nCName", "dnsRoot", "name", "netBIOSName", "systemFlags"],
