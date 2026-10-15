@@ -9,7 +9,7 @@ import os
 
 BH_VALID_RIGHTS = {"Owns", "GenericWrite", "WriteOwner", "WriteDacl", "AllExtendedRights"}
 
-def collect_gpos(ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
+def collect_gpos(adws_pull_client=None, ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
     if cache_file:
         with open(cache_file, "r", encoding="utf-8") as f:
             cache_data = json.load(f)
@@ -33,6 +33,7 @@ def collect_gpos(ip=None, domain=None, username=None, auth=None, base_dn_overrid
         ]
         query = "(objectClass=groupPolicyContainer)"
         gpos = pull_all_ad_objects(
+            adws_pull_client=adws_pull_client,
             ip=ip,
             domain=domain,
             username=username,
@@ -47,11 +48,12 @@ def collect_gpos(ip=None, domain=None, username=None, auth=None, base_dn_overrid
         #return [g for g in gpos if g.get("distinguishedName") and isinstance(g.get("distinguishedName"), str)]
 
 
-def collect_wmi_filters(ip, domain, username, auth, base_dn):
+def collect_wmi_filters(adws_pull_client=None, ip=None, domain=None, username=None, auth=None, base_dn=None):
     """Collect msWMI-Som objects and return a dict keyed by GUID (upper, no braces)."""
     wmi_base = f"CN=SOM,CN=WMIPolicy,CN=System,{base_dn}"
     try:
         results = pull_all_ad_objects(
+            adws_pull_client=adws_pull_client,
             ip=ip, domain=domain, username=username, auth=auth,
             query="(objectClass=msWMI-Som)",
             attributes=["distinguishedName", "msWMI-ID", "msWMI-Name", "msWMI-Parm1", "msWMI-Author", "msWMI-Parm2"],

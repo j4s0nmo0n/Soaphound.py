@@ -8,6 +8,7 @@ from soaphound.lib.utils import ADUtils
 
 
 def collect_users(
+    adws_pull_client=None,
     ip=None,
     domain=None,
     username=None,
@@ -66,6 +67,7 @@ def collect_users(
 
     # Retrieve the objects
     users = pull_all_ad_objects(
+        adws_pull_client=adws_pull_client,
         ip=ip,
         domain=domain,
         username=username,

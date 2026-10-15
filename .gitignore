@@ -71,3 +71,13 @@ resolve_sids_in_log.py
 *_Soaphound_CertFind.json
 *_Soaphound_CertFind.txt
 Cache.json
+
+# Pentest run outputs (local-only, never commit)
+2026*_*.json
+2026*_*.txt
+2026*_*.zip
+TrustsAudit*
+Certipy*
+privilege_rights*
+output/
+soaphound-out/

@@ -181,6 +181,14 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         force_epa = {"auto": None, "enabled": True, "disabled": False}.get(
             getattr(options, "cert_find_force_epa", "auto"), None
         )
+        # NOTE: --cert-find keeps its existing multi-session model for now.
+        # run_cert_find already receives adws_enum for its direct pulls, but its
+        # internal helpers (build_directory_maps, collect_current_user_sids,
+        # collect_certificate_templates, collect_certificate_authorities,
+        # fetch_ca_security_descriptors_adws, ...) still call pull_all_ad_objects
+        # with (ip, domain, username, auth) tuples, which opens one TCP:9389
+        # session per helper. The shared-session refactor is scoped to the
+        # BloodHound-equivalent collectors used by -c Default/ADWSOnly below.
         run_cert_find(
             adws_enum=adws_enum,
             resource_client=adws_resource,
@@ -211,13 +219,15 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     attributes_child = [ "objectSid", "objectClass", "objectGUID", "distinguishedName", "sAMAccountName", "sAMAccountType"]
     
     data_child_main = pull_all_ad_objects(
+        adws_pull_client=adws_enum,
         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
         query=main_query, attributes=attributes_child, base_dn_override=default_dn
     )
     all_child_items = data_child_main.get("objects", [])
-    
+
     # 4. Main collection (uses default_dn for base_dn)
     data_container_main = pull_all_ad_objects(
+        adws_pull_client=adws_enum,
         ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
         query=main_query, attributes=SOAPHOUND_CACHE_PROPERTIES, base_dn_override=default_dn
     )
@@ -256,11 +266,15 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 
     
     
-    # --- (1) Collect raw domains ---   
-    raw_domains = collect_domains(options.domain_controller, options.domain, options.username, auth)
-    
+    # --- (1) Collect raw domains ---
+    # Every ADWS collector below reuses the single `adws_enum` Enumeration
+    # session created above (one TCP:9389 connection, one SPNEGO handshake).
+    # The ip/domain/username/auth kwargs stay in the call for backward-compat
+    # with standalone callers of each collector that do not share a client.
+    raw_domains = collect_domains(adws_pull_client=adws_enum, ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth)
+
     # Collect and format containers
-    raw_containers = collect_containers(options.domain_controller, options.domain, options.username, auth)
+    raw_containers = collect_containers(adws_pull_client=adws_enum, ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth)
     containers_bh = format_containers(raw_containers, options.domain, default_dn, id_to_type_cache, value_to_id_cache, objs, objecttype_guid_map)
 
     # --- (2) Get main domain SID for formatting trusts etc. ---
@@ -280,13 +294,13 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     }
 
     # Collect and format GPOs
-    gpos = collect_gpos(options.domain_controller, options.domain, options.username, auth)
-    wmi_filters = collect_wmi_filters(options.domain_controller, options.domain, options.username, auth, default_dn)
+    gpos = collect_gpos(adws_pull_client=adws_enum, ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth)
+    wmi_filters = collect_wmi_filters(adws_pull_client=adws_enum, ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth, base_dn=default_dn)
     gpos_bh = format_gpos(gpos, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map, wmi_filters=wmi_filters)
-        
+
 
     # Collect and format Trusts
-    trusts = collect_trusts(options.domain_controller, options.domain, options.username, auth, domain_sid=domain_sid)
+    trusts = collect_trusts(adws_pull_client=adws_enum, ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth, domain_sid=domain_sid)
     
 
     
@@ -300,6 +314,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     if getattr(options, 'trust_audit', False):
         try:
             forest_trusts = collect_forest_trusts(
+                adws_pull_client=adws_enum,
                 ip=options.domain_controller,
                 domain=options.domain,
                 username=options.username,
@@ -375,23 +390,24 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 
  
     # Collect and format OUs
-    ous = collect_ous(options.domain_controller, options.domain, options.username, auth)
+    ous = collect_ous(adws_pull_client=adws_enum, ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth)
     ous_bh = format_ous(ous, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
 
     # Collect and format Groups
-    groups = collect_groups(options.domain_controller, options.domain, options.username, auth)
+    groups = collect_groups(adws_pull_client=adws_enum, ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth)
     groups_bh = format_groups(groups, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
 
     # Collect and format Users
     object_classes = adws_object_classes(adws_enum)
-    users = collect_users(options.domain_controller, options.domain, options.username, auth, adws_object_classes=object_classes,adws_objecttype_guid_map=objecttype_guid_map)
+    users = collect_users(adws_pull_client=adws_enum, ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth, adws_object_classes=object_classes,adws_objecttype_guid_map=objecttype_guid_map)
     users_bh = format_users(users, options.domain, domain_sid, id_to_type_cache, value_to_id_cache, objecttype_guid_map)
 
 
     # Collect and format Computers
     if (options.collectionmethod == "ADWSOnly"):
         computers = collect_computers_adws(
-            options.domain_controller, options.domain, options.username, auth,
+            adws_pull_client=adws_enum,
+            ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
             base_dn_override=default_dn, adws_object_classes=object_classes,
             has_laps=has_laps, has_lapsv2=has_laps2,objecttype_guid_map=objecttype_guid_map )
         
@@ -474,7 +490,8 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         addomain.get_domain_by_name = get_domain_by_name
 
         computers = collect_computers(
-            options.domain_controller, options.domain, options.username, auth,
+            adws_pull_client=adws_enum,
+            ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,
             base_dn_override=default_dn, adws_object_classes=object_classes,
             has_laps=has_laps, has_lapsv2=has_laps2, objecttype_guid_map=objecttype_guid_map
         )

@@ -5,6 +5,17 @@ All notable changes to Soaphound-py will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **adws**: share a single NMF Enumeration session across all BloodHound-equivalent
+  collectors. Reduces TCP:9389 connection count from N (one per collector) to 1
+  (plus occasional reconnects on server idle timeout). Backward-compat preserved
+  via the optional `adws_pull_client` argument on each collector; callers that
+  omit it fall back to the pre-refactor behaviour of opening a per-call session.
+  The `--cert-find` code path keeps its existing multi-session model for now
+  and is scoped out of this refactor.
+
 ## [1.2.1] - 2026-08-20
 
 ### Removed

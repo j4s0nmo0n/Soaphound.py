@@ -5,7 +5,7 @@ from soaphound.ad.adws import WELL_KNOWN_SIDS
 import json
 import unicodedata
 
-def collect_groups(ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
+def collect_groups(adws_pull_client=None, ip=None, domain=None, username=None, auth=None, base_dn_override=None, cache_file=None):
     """
     Collect all AD groups from the directory or from a cache.
     No filtering on objectClass or other attributes.
@@ -36,6 +36,7 @@ def collect_groups(ip=None, domain=None, username=None, auth=None, base_dn_overr
         ]
         query = "(objectCategory=group)"
         raw_objects = pull_all_ad_objects(
+            adws_pull_client=adws_pull_client,
             ip=ip,
             domain=domain,
             username=username,

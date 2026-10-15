@@ -7,7 +7,7 @@ from soaphound.ad.cache_gen import pull_all_ad_objects, filetime_to_unix, _parse
 from soaphound.ad.adws import WELL_KNOWN_SIDS
 from .trust import trust_to_bh_output
 
-def collect_domains(ip, domain, username, auth, base_dn_override=None, domain_functionality=None):
+def collect_domains(adws_pull_client=None, ip=None, domain=None, username=None, auth=None, base_dn_override=None, domain_functionality=None):
     """
     Collect domain-type objects (domainDNS only)
     """
@@ -16,6 +16,7 @@ def collect_domains(ip, domain, username, auth, base_dn_override=None, domain_fu
         "nTSecurityDescriptor", "whenCreated", "cn", "gPLink"
     ]
     domains = pull_all_ad_objects(
+        adws_pull_client=adws_pull_client,
         ip=ip,
         domain=domain,
         username=username,

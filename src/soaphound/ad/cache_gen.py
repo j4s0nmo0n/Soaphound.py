@@ -86,14 +86,30 @@ def generate_caches(all_objects):
 
     return value_to_id_cache, id_to_type_cache
 
-def pull_all_ad_objects(ip: str, domain: str, username: str, auth: ADWSAuthType, query: str, attributes: list, base_dn_override: str = None):
+def pull_all_ad_objects(adws_pull_client=None, ip: str = None, domain: str = None, username: str = None, auth: ADWSAuthType = None, query: str = None, attributes: list = None, base_dn_override: str = None):
     """
     Pulls all AD objects using ADWS for the given query and attributes.
     Always provide defaultNamingContext (real base DN) via base_dn_override.
+
+    When ``adws_pull_client`` is given, that ADWSConnect Enumeration session is
+    reused (no new TCP:9389 connection, no new SPNEGO handshake). The ip,
+    domain, username and auth arguments are then unused on the connection path;
+    they are kept in the signature so that external callers that build their
+    own ADWS client aren't forced to drop them, and so ``domain`` remains
+    available as a fallback for ``effective_base_dn`` when the caller omits
+    ``base_dn_override``.
+
+    When ``adws_pull_client`` is None, falls back to opening a new pull_client
+    with the (ip, domain, username, auth) tuple -- backward-compatible with
+    the pre-refactor behaviour so one-shot callers of a single collector keep
+    working unchanged.
     """
-    effective_base_dn = base_dn_override if base_dn_override else "DC=" + ",DC=".join(domain.split('.'))
-    logging.debug(f"Collecting AD objects. Domain: {domain}, Query: '{query}', Base DN: {effective_base_dn}, Attributes: {len(attributes)}")
-    pull_client = ADWSConnect.pull_client(ip, domain, username, auth)
+    effective_base_dn = base_dn_override if base_dn_override else "DC=" + ",DC=".join((domain or "").split('.'))
+    logging.debug(f"Collecting AD objects. Domain: {domain}, Query: '{query}', Base DN: {effective_base_dn}, Attributes: {len(attributes) if attributes else 0}")
+    if adws_pull_client is not None:
+        pull_client = adws_pull_client
+    else:
+        pull_client = ADWSConnect.pull_client(ip, domain, username, auth)
     all_pulled_items = []
     pull_et_root_items = pull_client.pull(query=query, attributes=attributes, base_object_dn_for_soap=effective_base_dn)
     if pull_et_root_items is None:
