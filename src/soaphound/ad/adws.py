@@ -31,6 +31,41 @@ from .soap_templates import (
     TM_CHANGE_OPTIONAL_FEATURE_FSTRING,
 )
 
+# MS-ADCAP ActiveDirectoryNameFormat enum (per [MS-ADCAP] Appendix A). Only
+# two values are defined by the contract -- the Win32 LSA EXTENDED_NAME_FORMAT
+# constants (NameFullyQualifiedDN=1, NameSamCompatible=2, etc.) are a
+# distinct enumeration and MUST NOT be mixed with this one. The ser:
+# EnumerationValue int in the WSDL annotation is kept here for traceability.
+_AD_NAME_FORMAT_NAMES: dict[int, str] = {
+    1: "DistinguishedName",
+    2: "CanonicalName",
+}
+
+
+def _ad_name_format_name(value: "int | str") -> str:
+    """Convert a MS-ADCAP ``ActiveDirectoryNameFormat`` value to the
+    PascalCase enum member name expected by the ADWS AccountManagement
+    endpoint (as declared in [MS-ADCAP] Appendix A).
+
+    Only ``1 -> "DistinguishedName"`` and ``2 -> "CanonicalName"`` are
+    defined by the contract. The richer EXTENDED_NAME_FORMAT values
+    (SAM / Display / UPN / SPN / UniqueId / etc. -- used by Win32
+    ``TranslateName`` through NTDSAPI/DRSR) are **not** part of
+    MS-ADCAP and raise ValueError here. Strings are passed through so
+    callers may supply the member name directly.
+    """
+    if isinstance(value, str):
+        return value
+    try:
+        return _AD_NAME_FORMAT_NAMES[value]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown ActiveDirectoryNameFormat value {value}; "
+            f"MS-ADCAP only defines {sorted(_AD_NAME_FORMAT_NAMES)}. "
+            f"Richer EXTENDED_NAME_FORMAT values are not supported by this contract."
+        ) from exc
+
+
 # --- Enums and Constants ---
 class SystemFlags(IntFlag):
     NONE = 0x00000000
@@ -796,10 +831,22 @@ class ADWSConnect:
         The ADWS endpoint path is ``Windows/TopologyManagement`` (MS-ADCAP
         section 3.2.3), served over the same net.tcp:9389 / MC-NMF framing /
         MS-NNS NegotiateStream carrier as the Enumeration and Resource
-        endpoints. Use the resulting client's ``get_ad_forest``,
-        ``translate_name`` and ``change_optional_feature`` methods.
+        endpoints. Use the resulting client's ``get_ad_forest`` and
+        ``change_optional_feature`` methods.
         """
         return cls(ip, domain, username, auth, "TopologyManagement")
+
+    @classmethod
+    def account_cap_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:
+        """Open an MS-ADCAP AccountManagement capability session on the DC.
+
+        The ADWS endpoint path is ``Windows/AccountManagement`` (MS-ADCAP
+        section 3.3), hosting operations such as ``TranslateName``,
+        ``ChangePassword`` and group membership queries. Different endpoint
+        from TopologyManagement -- the server rejects messages with a
+        ContractFilter mismatch if the two are mixed.
+        """
+        return cls(ip, domain, username, auth, "AccountManagement")
 
     # ------------------------------------------------------------------
     # MS-ADCAP TopologyManagement primitives
@@ -848,16 +895,16 @@ class ADWSConnect:
             ``{"error": "...", "detail": "..."}`` dict on SOAP Fault.
         """
         self._tm_require_endpoint()
-        soap = TM_GET_AD_FOREST_FSTRING.format(uuid=str(uuid4()), fqdn=self._fqdn, domain=self._domain)
+        soap = TM_GET_AD_FOREST_FSTRING.format(uuid=str(uuid4()), fqdn=self._fqdn)
         result = self._tm_fault_or_tree(soap)
         if isinstance(result, dict):
             return result
-        tm_ns = NAMESPACES["tm"]
-        payload = result.find(f".//{{{tm_ns}}}GetADForestResponse")
+        ca_ns = NAMESPACES["ca"]
+        payload = result.find(f".//{{{ca_ns}}}GetADForestResponse")
         if payload is None:
-            payload = result.find(f".//{{{tm_ns}}}GetADForestResult")
+            payload = result.find(f".//{{{ca_ns}}}GetADForestResult")
         if payload is None:
-            # Fallback: flatten every tm:* leaf we find under the body.
+            # Fallback: flatten every leaf we find under the body.
             payload = result
         flat: dict = {}
         for leaf in payload.iter():
@@ -866,37 +913,63 @@ class ADWSConnect:
                 flat[tag] = leaf.text.strip()
         return flat
 
-    def translate_name(self, name: str, format_offered: int = 2, format_desired: int = 1) -> dict:
+    def translate_name(self, name: str, format_offered: int = 1, format_desired: int = 2) -> dict:
         """Call MS-ADCAP ``TranslateName``.
 
+        Routed through the AccountManagement capability endpoint
+        (``Windows/AccountManagement``, MS-ADCAP section 3.3.4.6), not
+        TopologyManagement -- the server rejects a message sent to the
+        wrong endpoint with a ContractFilter mismatch.
+
+        MS-ADCAP's ``ActiveDirectoryNameFormat`` only defines
+        ``DistinguishedName`` (1) and ``CanonicalName`` (2) -- the richer
+        EXTENDED_NAME_FORMAT values (SAM / Display / UPN / SPN / UniqueId)
+        from Win32 LSA are unavailable through this contract. In practice
+        the implementation appears to be unidirectional (DN -> Canonical);
+        the reverse combo (offered=Canonical, desired=DN) triggers a
+        ``FormatDesired is not supported`` ArgumentError. Defaults reflect
+        the supported direction: input is a DN, output is the canonical
+        path.
+
         Args:
-            name: input principal to translate.
-            format_offered: input format code. 2 = NameSamCompatible (default).
-            format_desired: desired output format. 1 = NameFullyQualifiedDN
-                (default).
+            name: input principal to translate (default: DN).
+            format_offered: input format code. 1 = DistinguishedName
+                (default), 2 = CanonicalName.
+            format_desired: desired output format. 2 = CanonicalName
+                (default), 1 = DistinguishedName.
         """
-        self._tm_require_endpoint()
+        if self._resource != "AccountManagement":
+            raise NotImplementedError("translate_name requires an 'AccountManagement' client (use ADWSConnect.account_cap_client)")
         soap = TM_TRANSLATE_NAME_FSTRING.format(
             uuid=str(uuid4()), fqdn=self._fqdn,
-            name=name, format_offered=int(format_offered), format_desired=int(format_desired),
+            name=name,
+            format_offered=_ad_name_format_name(format_offered),
+            format_desired=_ad_name_format_name(format_desired),
         )
         result = self._tm_fault_or_tree(soap)
         if isinstance(result, dict):
             return result
-        tm_ns = NAMESPACES["tm"]
-        translated = [elem.text for elem in result.iter(f"{{{tm_ns}}}string") if elem.text]
-        return {"input": name, "format_offered": int(format_offered), "format_desired": int(format_desired), "translated": translated}
+        # Response strings may live in the Serialization/Arrays namespace, in
+        # the CustomActions namespace, or come back unqualified -- accept any
+        # local-name == "string" leaf under the body.
+        translated = [elem.text for elem in result.iter() if elem.text and (
+            elem.tag.split("}", 1)[-1] if "}" in elem.tag else elem.tag) == "string"]
+        return {"input": name, "format_offered": format_offered, "format_desired": format_desired, "translated": translated}
 
-    def change_optional_feature(self, feature_guid: str, enable: bool = True) -> dict:
+    def change_optional_feature(self, distinguished_name: str, feature_guid: str, enable: bool = True) -> dict:
         """Call MS-ADCAP ``ChangeOptionalFeature``.
 
         Args:
-            feature_guid: GUID of the optional feature (e.g. Recycle Bin).
+            distinguished_name: DN of the context where the feature is
+                toggled. For forest-level features (e.g. Recycle Bin) this
+                is typically ``CN=Partitions,CN=Configuration,<rootDN>``.
+            feature_guid: GUID of the optional feature.
             enable: True to enable, False to disable.
         """
         self._tm_require_endpoint()
         soap = TM_CHANGE_OPTIONAL_FEATURE_FSTRING.format(
             uuid=str(uuid4()), fqdn=self._fqdn,
+            distinguished_name=distinguished_name,
             feature_guid=feature_guid, enable_bool=str(bool(enable)).lower(),
         )
         result = self._tm_fault_or_tree(soap)
@@ -904,4 +977,4 @@ class ADWSConnect:
             return result
         # No specific payload fields on success -- the write is confirmed by
         # the absence of a Fault and a 2xx-equivalent empty Body.
-        return {"feature_guid": feature_guid, "enable": bool(enable), "result": "ok"}
+        return {"distinguished_name": distinguished_name, "feature_guid": feature_guid, "enable": bool(enable), "result": "ok"}

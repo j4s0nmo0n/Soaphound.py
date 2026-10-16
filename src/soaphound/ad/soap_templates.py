@@ -100,26 +100,32 @@ LDAP_PULL_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-
 
 
 # ---------------------------------------------------------------------------
-# MS-ADCAP TopologyManagement templates
+# MS-ADCAP CustomActions templates (TopologyManagement + AccountManagement)
 # ---------------------------------------------------------------------------
-# Three primitive messages against the TopologyManagement capability endpoint
-# at net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/TopologyManagement.
-# Action URIs come from MS-ADCAP section 3.2.4. All three share the same
-# WS-Addressing + SOAP 1.2 envelope used by the Enumeration and Resource
-# templates above; only the Action header and body change.
+# Three primitive messages against the ADWS CustomActions capabilities exposed
+# over net.tcp:9389. Reference: [MS-ADCAP] Appendix A: Full WSDL, operations
+# TopologyManagement.GetADForest, AccountManagement.TranslateName,
+# TopologyManagement.ChangeOptionalFeature. All three share the same SOAP 1.2
+# + WS-Addressing envelope used by the Enumeration and Resource templates
+# above; what changes is the Action URI, the a:To URL (which endpoint of the
+# ADWS service hosts the capability), and the body wrapper namespace
+# (xmlns:ca = http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions).
 #
-# NOTE: these templates are minimal payloads intended for the three use cases
-# the Linux offensive tooling world does not currently cover (GetADForest,
-# TranslateName, ChangeOptionalFeature). Richer field sets (site topology,
-# optional feature state) can be added later without touching the dispatch.
+# Note: <ca:Server> is NOT the DC's DNS FQDN -- it is the LDAP instance
+# identifier of the directory on that DC (per [MS-ADCAP] 2.2.3.5 note <4>):
+#   "ldap:389"   -> AD DS
+#   "ldap:3268"  -> AD DS Global Catalog
+#   "ldap:N"     -> AD LDS instance on port N
+# A FQDN here triggers NonNTDSOrADLDSInstanceInTheHeader / InvalidInstance
+# server-side. We hardcode ldap:389 (standard AD DS) for the three primitives.
+# Operators needing GC or AD LDS can bypass with a custom template.
 
 TM_GET_AD_FOREST_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
     xmlns:a="http://www.w3.org/2005/08/addressing"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:tm="http://schemas.microsoft.com/2008/1/ActiveDirectory/TopologyManagement">
+    xmlns:ca="http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions">
     <s:Header>
-        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/TopologyManagement/GetADForest</a:Action>
+        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions/TopologyManagement/GetADForest</a:Action>
+        <ca:Server>ldap:389</ca:Server>
         <a:MessageID>urn:uuid:{uuid}</a:MessageID>
         <a:ReplyTo>
             <a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
@@ -127,41 +133,40 @@ TM_GET_AD_FOREST_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/0
         <a:To s:mustUnderstand="1">net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/TopologyManagement</a:To>
     </s:Header>
     <s:Body>
-        <tm:GetADForest>
-            <tm:forestFQDN>{domain}</tm:forestFQDN>
-        </tm:GetADForest>
+        <ca:GetADForestRequest/>
     </s:Body>
 </s:Envelope>"""
 
 TM_TRANSLATE_NAME_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
     xmlns:a="http://www.w3.org/2005/08/addressing"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:tm="http://schemas.microsoft.com/2008/1/ActiveDirectory/TopologyManagement">
+    xmlns:ca="http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions"
+    xmlns:sera="http://schemas.microsoft.com/2003/10/Serialization/Arrays">
     <s:Header>
-        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/TopologyManagement/TranslateName</a:Action>
+        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions/AccountManagement/TranslateName</a:Action>
+        <ca:Server>ldap:389</ca:Server>
         <a:MessageID>urn:uuid:{uuid}</a:MessageID>
         <a:ReplyTo>
             <a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
         </a:ReplyTo>
-        <a:To s:mustUnderstand="1">net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/TopologyManagement</a:To>
+        <a:To s:mustUnderstand="1">net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/AccountManagement</a:To>
     </s:Header>
     <s:Body>
-        <tm:TranslateName>
-            <tm:names><tm:string>{name}</tm:string></tm:names>
-            <tm:formatOffered>{format_offered}</tm:formatOffered>
-            <tm:formatDesired>{format_desired}</tm:formatDesired>
-        </tm:TranslateName>
+        <ca:TranslateNameRequest>
+            <ca:FormatOffered>{format_offered}</ca:FormatOffered>
+            <ca:FormatDesired>{format_desired}</ca:FormatDesired>
+            <ca:Names>
+                <sera:string>{name}</sera:string>
+            </ca:Names>
+        </ca:TranslateNameRequest>
     </s:Body>
 </s:Envelope>"""
 
 TM_CHANGE_OPTIONAL_FEATURE_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
     xmlns:a="http://www.w3.org/2005/08/addressing"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:tm="http://schemas.microsoft.com/2008/1/ActiveDirectory/TopologyManagement">
+    xmlns:ca="http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions">
     <s:Header>
-        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/TopologyManagement/ChangeOptionalFeature</a:Action>
+        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions/TopologyManagement/ChangeOptionalFeature</a:Action>
+        <ca:Server>ldap:389</ca:Server>
         <a:MessageID>urn:uuid:{uuid}</a:MessageID>
         <a:ReplyTo>
             <a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
@@ -169,10 +174,11 @@ TM_CHANGE_OPTIONAL_FEATURE_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.
         <a:To s:mustUnderstand="1">net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/TopologyManagement</a:To>
     </s:Header>
     <s:Body>
-        <tm:ChangeOptionalFeature>
-            <tm:featureID>{feature_guid}</tm:featureID>
-            <tm:enable>{enable_bool}</tm:enable>
-        </tm:ChangeOptionalFeature>
+        <ca:ChangeOptionalFeatureRequest>
+            <ca:DistinguishedName>{distinguished_name}</ca:DistinguishedName>
+            <ca:FeatureId>{feature_guid}</ca:FeatureId>
+            <ca:Enable>{enable_bool}</ca:Enable>
+        </ca:ChangeOptionalFeatureRequest>
     </s:Body>
 </s:Envelope>"""
 

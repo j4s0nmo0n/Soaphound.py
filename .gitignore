@@ -81,3 +81,19 @@ Certipy*
 privilege_rights*
 output/
 soaphound-out/
+
+# Pentest / collect outputs — never commit
+[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*.json
+[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*.txt
+*_Soaphound_CertFind*
+TrustsAudit*
+Certipy*
+privilege_rights*
+Cache.json
+*.log
+output/
+loot/
+soaphound-out/
+bloodhound-out/
+*-resolved.log
+*-fixes.patch

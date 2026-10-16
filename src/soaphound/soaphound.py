@@ -1,4 +1,4 @@
-import logging, sys, os, getpass, json, dns.resolver, datetime, time, zipfile, base64
+import logging, sys, os, getpass, json, dns.resolver, datetime, time, zipfile, base64, socket
 from soaphound.lib.cli import gen_cli_args
 from impacket.ldap.ldaptypes import LDAP_SID
 from soaphound.ad.adws import ADWSConnect, NTLMAuth, KerberosAuth
@@ -23,6 +23,32 @@ from soaphound.lib.authentication import ADAuthentication
 from soaphound.ad.collectors.computer import collect_computers, format_computers
 from soaphound.ad.collectors.computer_adws import collect_computers_adws, format_computers_adws
 from soaphound.lib.domain import ADDomain
+
+
+def _resolve_dc_fqdn(dc_arg: str) -> str:
+    """Return the FQDN of the DC. If dc_arg is already a FQDN (contains a
+    dot and is not a dotted-quad IP), return as-is. If it is an IPv4
+    address, do a reverse DNS lookup. Abort with a clear error if the
+    lookup fails -- MS-ADCAP primitives require a DNS identity in the
+    <ca:Server> header, not an IP literal (which triggers an 'Instance
+    invalid' fault server-side)."""
+    try:
+        socket.inet_aton(dc_arg)
+        is_ipv4 = True
+    except OSError:
+        is_ipv4 = False
+    if not is_ipv4:
+        return dc_arg
+    try:
+        fqdn, _aliases, _addrs = socket.gethostbyaddr(dc_arg)
+    except OSError as exc:
+        raise SystemExit(
+            f"[-] MS-ADCAP primitives require a DNS hostname for the DC, "
+            f"but '-dc {dc_arg}' is an IP and reverse DNS lookup failed: {exc}. "
+            f"Re-run with '-dc <dc-fqdn>' (e.g. '-dc dc-curse.jjk.local')."
+        )
+    return fqdn
+
 
 def export_bloodhound_json(data, output_path):
     output_dir = os.path.dirname(output_path)
@@ -160,23 +186,44 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 
     print(banner)
 
-    # MS-ADCAP TopologyManagement dispatch. These flags are mutually exclusive
+    # MS-ADCAP CustomActions dispatch. These flags are mutually exclusive
     # (enforced by argparse) and short-circuit the whole collect pipeline: no
-    # RootDSE, no Enumeration session, no cache, just one TopologyManagement
-    # SOAP round-trip. Keeps the measurement signature small and separates the
+    # RootDSE, no Enumeration session, no cache, just one CustomActions SOAP
+    # round-trip. Keeps the measurement signature small and separates the
     # MS-ADCAP primitives cleanly from the BloodHound collectors.
+    #
+    # Note the endpoint split: GetADForest and ChangeOptionalFeature target
+    # the TopologyManagement capability, TranslateName targets the
+    # AccountManagement capability (MS-ADCAP sections 3.2 vs 3.3).
     if getattr(options, "adcap_get_forest", False) \
             or getattr(options, "adcap_translate", None) \
             or getattr(options, "adcap_change_feature", None):
-        tm_client = ADWSConnect.topology_cap_client(
-            options.domain_controller, options.domain, options.username, auth,
-        )
+        # <ca:Server> header rejects an IP literal with 'Instance invalid';
+        # resolve to an FQDN before opening any CustomActions client.
+        dc_fqdn = _resolve_dc_fqdn(options.domain_controller)
         if getattr(options, "adcap_get_forest", False):
+            tm_client = ADWSConnect.topology_cap_client(
+                dc_fqdn, options.domain, options.username, auth,
+            )
             result = tm_client.get_ad_forest()
         elif getattr(options, "adcap_translate", None):
-            result = tm_client.translate_name(options.adcap_translate)
+            am_client = ADWSConnect.account_cap_client(
+                dc_fqdn, options.domain, options.username, auth,
+            )
+            result = am_client.translate_name(options.adcap_translate)
         else:
-            result = tm_client.change_optional_feature(options.adcap_change_feature, enable=True)
+            # Default DN for forest-level optional features (e.g. Recycle Bin):
+            # CN=Partitions,CN=Configuration,<rootDN>. Overridable via
+            # --adcap-change-feature-dn for feature-specific contexts.
+            dn = getattr(options, "adcap_change_feature_dn", None)
+            if not dn:
+                dn = "CN=Partitions,CN=Configuration," + ",".join(
+                    f"DC={part}" for part in options.domain.split(".") if part
+                )
+            tm_client = ADWSConnect.topology_cap_client(
+                dc_fqdn, options.domain, options.username, auth,
+            )
+            result = tm_client.change_optional_feature(dn, options.adcap_change_feature, enable=True)
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return
 
