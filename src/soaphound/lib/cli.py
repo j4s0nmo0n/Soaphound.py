@@ -156,6 +156,13 @@ def gen_cli_args():
         default=None,
         help="Call MS-ADCAP ChangeOptionalFeature for the optional feature GUID (enables it by default).",
     )
+    adcap_group.add_argument(
+        "--adcap-change-feature-dn",
+        metavar="DN",
+        action="store",
+        default=None,
+        help="Distinguished name of the context used by --adcap-change-feature. Defaults to CN=Partitions,CN=Configuration,<rootDN> (forest-level features like the Recycle Bin). Override for feature-specific contexts.",
+    )
 
     if len(sys.argv) == 1:
         parser.print_help()
