@@ -61,15 +61,6 @@ TRUST_DIRECTION_MAP = {
     3: "Bidirectional"
 }
 
-TRUST_TYPE_MAP = {
-    0: "ParentChild",  # BloodHound.py sometimes uses 0 for ParentChild
-    1: "ParentChild",
-    2: "TreeRoot",
-    3: "External",
-    4: "Forest",
-    5: "Realm",
-    6: "MIT"
-}
 
 def trust_to_bh_output(trust_obj, self_domain=None):
     """
