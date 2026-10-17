@@ -169,7 +169,7 @@ def format_domains(domains, domain_name, domain_root_dn, id_to_type_cache, value
         for trust in all_trusts:
             # Compare the domain SID (make sure both are uppercase for robustness)
             if trust.get("domainsid", "").upper() == domain_sid_str.upper():
-                trusts_for_domain.append(trust_to_bh_output(trust))
+                trusts_for_domain.append(trust_to_bh_output(trust, self_domain=domain_name))
 
 
         domain_bh_entry = {

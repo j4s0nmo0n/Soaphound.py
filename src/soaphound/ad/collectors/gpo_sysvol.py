@@ -39,6 +39,7 @@ _TRACKED_PRIVRIGHTS = {
     "setcbprivilege",
     "sedebugprivilege",
     "seimpersonateprivilege",
+    "seassignprimarytokenprivilege",
     "seloaddriverprivilege",
     "sebackupprivilege",
     "serestoreprivilege",
