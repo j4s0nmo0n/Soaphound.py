@@ -71,10 +71,18 @@ TRUST_TYPE_MAP = {
     6: "MIT"
 }
 
-def trust_to_bh_output(trust_obj):
+def trust_to_bh_output(trust_obj, self_domain=None):
     """
     Transform an LDAP trust object to BloodHound 'Trusts' format for domains.json.
     Converts TrustDirection and TrustType to string values expected by BloodHound CE.
+
+    When the collecting domain's DNS name is known (either passed as
+    self_domain or carried on the trust object as 'source_domain_name',
+    populated by collect_forest_trusts), the posture is derived with the
+    full BloodHound-canonical classification covering ParentChild, TreeRoot,
+    Shortcut, Forest, External, MIT, DCE and DOWNLEVEL. When neither is
+    available, the function falls back to the legacy flag-only derivation
+    for backward compatibility.
     """
     # All known trust flags
     TRUST_FLAGS = {
@@ -86,6 +94,7 @@ def trust_to_bh_output(trust_obj):
         'WITHIN_FOREST': 0x00000020,
         'TREAT_AS_EXTERNAL': 0x00000040,
         'USES_RC4_ENCRYPTION': 0x00000080,
+        'USES_AES_KEYS': 0x00000100,
         'PIM_TRUST': 0x00000400,
         'CROSS_ORGANIZATION_NO_TGT_DELEGATION': 0x00000200,
         'CROSS_ORGANIZATION_ENABLE_TGT_DELEGATION': 0x00000800,
@@ -100,7 +109,8 @@ def trust_to_bh_output(trust_obj):
     sid_filtering = True
 
     flags = int(trust_obj.get("trustAttributes", 0) or 0)
-    # Logic for determining trust type and its properties
+    trust_type_raw = int(trust_obj.get("trustType", 0) or 0)
+    # Logic for determining trust properties (transitivity, sid filtering)
     if has_flag(flags, 'WITHIN_FOREST'):
         trusttype = 'ParentChild'
         is_transitive = True
@@ -116,8 +126,16 @@ def trust_to_bh_output(trust_obj):
     else:
         is_transitive = not has_flag(flags, 'NON_TRANSITIVE')
 
-    # Get string representation for TrustType
-    trusttype_out = trusttype
+    # Posture classification: prefer the DNS-aware derivation when we know
+    # the collecting domain, otherwise keep the legacy flag-only label.
+    collecting_domain = self_domain or trust_obj.get('source_domain_name')
+    trust_partner = trust_obj.get('trustPartner') or trust_obj.get('flatName') or ''
+    if collecting_domain and trust_type_raw:
+        trusttype_out = _classify_trust_posture(
+            trust_type_raw, flags, collecting_domain, trust_partner,
+        )
+    else:
+        trusttype_out = trusttype
 
     secid_raw = trust_obj.get('securityIdentifier')
     try:
@@ -172,6 +190,7 @@ _TRUST_FLAGS = {
     'WITHIN_FOREST': 0x00000020,
     'TREAT_AS_EXTERNAL': 0x00000040,
     'USES_RC4_ENCRYPTION': 0x00000080,
+    'USES_AES_KEYS': 0x00000100,
     'CROSS_ORGANIZATION_NO_TGT_DELEGATION': 0x00000200,
     'PIM_TRUST': 0x00000400,
     'CROSS_ORGANIZATION_ENABLE_TGT_DELEGATION': 0x00000800,
@@ -186,6 +205,70 @@ def _has_flag(flags, flagname):
 def _decode_flag_names(flags):
     """Return the list of flag names that are set in the given int."""
     return [name for name, bit in _TRUST_FLAGS.items() if (flags & bit) == bit]
+
+
+def _dns_relation(self_domain, trust_partner):
+    """Classify DNS relation between the collecting domain and the trust
+    partner. Returns one of: 'parent-child', 'shortcut', 'unrelated'.
+
+    A trust partner is parent-child when it is exactly one DNS label
+    above or below the collecting domain (direct hierarchy edge). It is
+    shortcut when both share a DNS suffix of at least two labels but are
+    not adjacent (same forest, non-adjacent). Otherwise unrelated.
+    """
+    if not self_domain or not trust_partner:
+        return 'unrelated'
+    self_labels = self_domain.lower().strip('.').split('.')
+    partner_labels = trust_partner.lower().strip('.').split('.')
+    if self_labels == partner_labels:
+        return 'unrelated'
+    # Partner is a direct child of self (one label added below self)
+    if (len(partner_labels) == len(self_labels) + 1 and
+            partner_labels[-len(self_labels):] == self_labels):
+        return 'parent-child'
+    # Partner is a direct parent of self (one label removed above self)
+    if (len(self_labels) == len(partner_labels) + 1 and
+            self_labels[-len(partner_labels):] == partner_labels):
+        return 'parent-child'
+    # Shared suffix of at least two labels: same forest, non-adjacent
+    max_common = min(len(self_labels), len(partner_labels))
+    for i in range(max_common, 1, -1):
+        if self_labels[-i:] == partner_labels[-i:]:
+            return 'shortcut'
+    return 'unrelated'
+
+
+def _classify_trust_posture(trust_type, trust_attributes, self_domain, trust_partner):
+    """Derive BloodHound-canonical trust posture from LDAP trustType +
+    trustAttributes bitfield + DNS relationship between the collecting
+    domain and the trust partner.
+
+    Rules follow [MS-ADTS] 6.1.6.7.9 for the flag definitions and the
+    BloodHound CE Domain schema for the posture labels. trustType values
+    per MS-ADTS 6.1.6.7.15: 1=DOWNLEVEL (NT4), 2=UPLEVEL (W2K+),
+    3=MIT (Kerberos realm), 4=DCE.
+    """
+    WITHIN_FOREST = 0x20
+    FOREST_TRANSITIVE = 0x8
+
+    if trust_type == 3:
+        return 'MIT'
+    if trust_type == 4:
+        return 'DCE'
+    if trust_type == 1:
+        return 'DOWNLEVEL'
+    if trust_type == 2:
+        if trust_attributes & WITHIN_FOREST:
+            dns_rel = _dns_relation(self_domain, trust_partner)
+            if dns_rel == 'parent-child':
+                return 'ParentChild'
+            if dns_rel == 'shortcut':
+                return 'Shortcut'
+            return 'TreeRoot'
+        if trust_attributes & FOREST_TRANSITIVE:
+            return 'Forest'
+        return 'External'
+    return 'Unknown'
 
 
 def analyze_trust_dimensions(trust_obj):
@@ -424,7 +507,7 @@ def detect_trust_risks(trust_obj, dimensions):
     return risks
 
 
-def trust_to_audit_output(trust_obj):
+def trust_to_audit_output(trust_obj, self_domain=None):
     """Enriched output for trust audit reports.
 
     Extends trust_to_bh_output() with:
@@ -439,7 +522,7 @@ def trust_to_audit_output(trust_obj):
     All existing BloodHound fields are preserved untouched. BloodHound will
     ignore the extra fields, so this output can also be used for BH input.
     """
-    bh = trust_to_bh_output(trust_obj)
+    bh = trust_to_bh_output(trust_obj, self_domain=self_domain)
     dimensions = analyze_trust_dimensions(trust_obj)
     risks = detect_trust_risks(trust_obj, dimensions)
 
