@@ -98,3 +98,8 @@ bloodhound-out/
 *-resolved.log
 *-fixes.patch
 src/soaphound_py.egg-info/
+
+# Setuptools build artefacts
+*.egg-info/
+build/
+dist/
