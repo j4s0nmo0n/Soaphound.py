@@ -4,7 +4,19 @@ While reading [BloodHound.py](https://github.com/dirkjanm/BloodHound.py), a Linu
 
 We sought to follow a similar logic while implementing Soaphound.py, aiming to collect the most valuable information during object enumeration through ADWS. In addition, since user sessions on machines are not collected through LDAP, we reused BloodHound.py's approach to perform this collection.
 
-The tool is currently being improved to cover all specific data collection scenarios. At the time of writing, it is capable of collecting Active Directory objects via the ADWS service and retrieving remote session data similar to what BloodHound.py achieves. Alternatively, it can operate in a mode restricted to collecting only AD objects through ADWS using the `-c ADWSOnly` option.
+The tool is currently being improved to cover all specific data collection scenarios. At the time of writing, it is capable of collecting Active Directory objects via the ADWS service and retrieving remote session data similar to what BloodHound.py achieves.
+
+## Collection methods
+
+| Preset | Network ports | AD coverage | Use case |
+|---|---|---|---|
+| `-c Default` (default) | TCP:9389 (ADWS, including cross-NC referral follow) + TCP:445 (SMB SYSVOL when GPOs are found, plus per-host sessions) | **Full** — all objects, GPO settings, local admins, GPP cpassword, trust risks | Standard pentest, AD audit |
+| `-c Stealth` | TCP:9389 only (ADWS + referral follow stays on ADWS) | **Partial** — AD objects only; GPO settings, local admins, cpassword and computer sessions NOT collected | Red Team ops where SMB is blocked or monitored |
+| `-c ADWSOnly` | (deprecated alias of Stealth) | Same as Stealth | Backward compatibility, will be removed in v1.5 |
+
+**Note on referrals.** When a cross-naming-context query (for example a trust in another forest partition) returns an `ADWSReferralError`, Soaphound.py opens a new ADWS session on the referred DC. The target URL is formatted as `ldap://<fqdn>/...` by the server, but the client connection stays on TCP:9389 — no native LDAP (TCP:389) traffic is generated.
+
+**Why two modes?** The richest offensive signals (local admins, user rights, GPP cpassword credentials) live in SYSVOL, not in the AD database. A proper reconnaissance requires reading both over ADWS AND over SMB SYSVOL. The Stealth mode exists for the specific case where SMB TCP:445 is unavailable or must stay silent, with the explicit trade-off of a partial output.
 
 More information: [you may check out the short blog post](https://j4s0nmo0n.github.io/belettetimoree.github.io/Soaphound.py%20-%20Collecting%20Active%20Directory%20Objects%20over%20ADWS%20from%20Linux.html)
 
@@ -33,9 +45,11 @@ Python based ingestor for BloodHound using ADWS
 
 options:
   -h, --help            show this help message and exit
-  -c, --collectionmethod COLLECTIONMETHOD
-                        Which information to collect: Default or ADWSOnly
-                        (no computer connections).
+  -c, --collectionmethod {Default,Stealth,ADWSOnly}
+                        Collection preset. Default: AD objects via ADWS +
+                        GPO via SMB SYSVOL (full output). Stealth: ADWS
+                        only, TCP:9389 only, no SMB. ADWSOnly: deprecated
+                        alias of Stealth, will be removed in v1.5.
   -d, --domain DOMAIN   Domain to query.
   -v                    Enable verbose output.
   --ts                  Add timestamp to logs.
@@ -129,10 +143,10 @@ Perform ADWS collection with session enumeration
 soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output
 ```
 
-Perform ADWS-only collection (no SMB session enumeration)
+Perform Stealth collection (ADWS only, no SMB — skips SYSVOL, local admins, cpassword, computer sessions)
 
 ```
-soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output -c ADWSOnly
+soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output -c Stealth
 ```
 
 Perform ADCS information collection
@@ -154,11 +168,11 @@ export KRB5CCNAME=/tmp/yuji.ccache
 # Run Soaphound with Kerberos
 soaphound -d jjk.local -u yuji -dc dc-curse.jjk.local -k
 
-# Run ADWS-only collection with Kerberos
-soaphound -d jjk.local -u yuji -dc dc-curse.jjk.local -k -c ADWSOnly
+# Run Stealth collection with Kerberos (ADWS only, no SMB)
+soaphound -d jjk.local -u yuji -dc dc-curse.jjk.local -k -c Stealth
 
 # Let Soaphound extract the username and domain from the ccache
-soaphound -dc dc-curse.jjk.local -k -c ADWSOnly
+soaphound -dc dc-curse.jjk.local -k -c Stealth
 
 # Use a different KDC
 soaphound -d jjk.local -u yuji -dc adws.jjk.local -dc-ip kdc.jjk.local -k

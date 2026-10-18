@@ -90,6 +90,13 @@ def zip_bloodhound_jsons(output_dir, timestamp,  archive_name="BloodHound.zip"):
 
 def main():
     options = gen_cli_args()
+
+    # Apply ADWSOnly -> Stealth deprecation alias and emit the stealth
+    # warning before any collection step runs. Both go to stderr so they
+    # stay visible even without -v.
+    from soaphound.lib.collection_mode import normalize_collection_method, should_skip_sysvol
+    normalize_collection_method(options)
+
     banner = """
  .oooooo..o                                oooo                                                .o8                             
 d8P'    `Y8                                `888                                               "888                             
@@ -255,7 +262,7 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
         # fetch_ca_security_descriptors_adws, ...) still call pull_all_ad_objects
         # with (ip, domain, username, auth) tuples, which opens one TCP:9389
         # session per helper. The shared-session refactor is scoped to the
-        # BloodHound-equivalent collectors used by -c Default/ADWSOnly below.
+        # BloodHound-equivalent collectors used by -c Default/Stealth below.
         run_cert_find(
             adws_enum=adws_enum,
             resource_client=adws_resource,
@@ -417,7 +424,14 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
     gpp_passwords = []
     privilege_rights = {}
     _gpo_guids_with_changes = set()
-    sysvol_conn = connect_sysvol(options.domain_controller, options.domain, options.username, auth)
+    if should_skip_sysvol(options):
+        logging.info(
+            "[!] Stealth mode: skipping SYSVOL collection (TCP:445). "
+            "GPO settings, local admins and GPP cpassword will not be in the output."
+        )
+        sysvol_conn = None
+    else:
+        sysvol_conn = connect_sysvol(options.domain_controller, options.domain, options.username, auth)
     if sysvol_conn:
         try:
             import re as _re
@@ -471,7 +485,9 @@ oo     .d8P 888   888 d8(  888   888   888  888   888  888   888  888   888   88
 
 
     # Collect and format Computers
-    if (options.collectionmethod == "ADWSOnly"):
+    # Stealth skips the SMB/RPC session enumeration path. ADWSOnly is
+    # remapped to Stealth above, so it never reaches this check.
+    if (options.collectionmethod == "Stealth"):
         computers = collect_computers_adws(
             adws_pull_client=adws_enum,
             ip=options.domain_controller, domain=options.domain, username=options.username, auth=auth,

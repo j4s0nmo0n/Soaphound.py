@@ -22,7 +22,16 @@ def gen_cli_args():
                         '--collectionmethod',
                         action='store',
                         default='Default',
-                        help='Which information to collect : Default or ADWSOnly (no computer connections).')
+                        choices=('Default', 'Stealth', 'ADWSOnly'),
+                        help=(
+                            "Collection preset. "
+                            "Default: AD objects via ADWS (TCP:9389) + GPO settings via SMB SYSVOL (TCP:445). "
+                            "Richest BloodHound output. "
+                            "Stealth: ADWS-strict (TCP:9389 only, including referral follow). "
+                            "Skips SYSVOL, so GPO settings, local admins and GPP cpassword are not collected. "
+                            "Use when SMB is blocked or monitored. "
+                            "ADWSOnly: deprecated alias of Stealth, will be removed in v1.5."
+                        ))
     parser.add_argument('-d',
                         '--domain',
                         action='store',
