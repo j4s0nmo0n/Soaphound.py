@@ -7,7 +7,7 @@ from uuid import UUID
 from soaphound.ad.adws import ADWSConnect, NTLMAuth, KerberosAuth, ADWSAuthType
 from soaphound.ad.soap_templates import NAMESPACES
 from base64 import b64decode, b64encode
-from soaphound.ad.adws import ADWSError, ADWSReferralError
+from soaphound.ad.adws import ADWSError, ADWSReferralError, ADWSInvalidPropertyError
 from soaphound.ad.embedded_schema import EMBEDDED_OBJECTTYPE_GUID_MAP
 from impacket.ldap.ldaptypes import LDAP_SID
 
@@ -111,7 +111,32 @@ def pull_all_ad_objects(adws_pull_client=None, ip: str = None, domain: str = Non
     else:
         pull_client = ADWSConnect.pull_client(ip, domain, username, auth)
     all_pulled_items = []
-    pull_et_root_items = pull_client.pull(query=query, attributes=attributes, base_object_dn_for_soap=effective_base_dn)
+    # Retry while the DC rejects individual attributes that are advertised in
+    # the (possibly embedded/fallback) schema map but not actually present in
+    # the target domain -- most often stale LAPS attributes. Drop the offending
+    # attribute and try again so collection still succeeds.
+    attributes = list(attributes) if attributes else attributes
+    while True:
+        try:
+            pull_et_root_items = pull_client.pull(query=query, attributes=attributes, base_object_dn_for_soap=effective_base_dn)
+            break
+        except ADWSInvalidPropertyError as e:
+            removed = None
+            for attr in (attributes or []):
+                if attr.lower() == (e.invalid_property or "").lower():
+                    removed = attr
+                    break
+            if removed is None or not attributes or len(attributes) <= 1:
+                logging.error(
+                    f"ADWS rejected attribute '{e.invalid_property}' and it could not be "
+                    f"dropped from the request for query '{query}'."
+                )
+                raise
+            attributes.remove(removed)
+            logging.warning(
+                f"Attribute '{removed}' is not valid in the target schema; "
+                f"retrying query '{query}' without it."
+            )
     if pull_et_root_items is None:
         logging.error(f"ADWSConnect.pull returned None for query '{query}' and base '{effective_base_dn}'.")
         return {"objects": [], "domain_root_dn": effective_base_dn, "effective_base_dn_used": effective_base_dn}
