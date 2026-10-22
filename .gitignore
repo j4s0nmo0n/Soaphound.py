@@ -103,3 +103,12 @@ src/soaphound_py.egg-info/
 *.egg-info/
 build/
 dist/
+
+# Local scratch work (design reviews, notes, drafts — never commit)
+scratch/
+
+# Lab capture artefacts (PNG screenshots with jjk.local DNs / SIDs — expose
+# the lab setup; the Hackfest slide pulls from here but PNGs never land on
+# origin).
+measurements/
+measurements/

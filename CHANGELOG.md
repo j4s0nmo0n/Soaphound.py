@@ -29,6 +29,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented in the docstring. Previously, passing 'xsd:string' produced
   a malformed xsi:type and the server rejected the write with
   AttributeTypeNotValidForEntry.
+
+## [1.5.0] - 2026-10-21
+
+### Added
+- **attacks**: BadSuccessor via ADWS attack primitive. See README section
+  "BadSuccessor via ADWS" for usage. Based on Akamai advisory (Yuval
+  Gordon, May 2024). Three ADWS writes (WS-Transfer Create against the
+  ResourceFactory endpoint, then two WS-Transfer Put against Resource via
+  the existing `ADWSConnect.put`) to turn a dMSA into a successor of a
+  target principal. Includes `--dry-run` and `--rollback` modes, a
+  dedicated `insufficientAccessRights` message on Op 1 failure, and
+  Kerberos hand-off instructions in the README. Downstream Kerberos
+  ticket recovery stays external (secretsdump + getTGT).
+- **ad.writers**: new module exposing `ws_transfer_create`,
+  `ws_transfer_put` (thin wrapper over `ADWSConnect.put`) and
+  `ws_transfer_delete`.
+- **ad.soap_templates**: new `WS_TRANSFER_CREATE_FSTRING` and
+  `WS_TRANSFER_DELETE_FSTRING` templates. Put re-uses the existing
+  `LDAP_PUT_FSTRING`.
+
 ## [1.2.1] - 2026-08-20
 
 ### Removed

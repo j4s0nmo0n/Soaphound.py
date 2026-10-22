@@ -818,7 +818,14 @@ class ADWSConnect:
 
     @classmethod
     def create_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:
-        raise NotImplementedError()
+        """Open a dedicated ADWS session bound to the ``Windows/ResourceFactory``
+        endpoint. Each ADWS endpoint has its own net.tcp:9389 WCF binding,
+        so WS-Transfer Create requests cannot ride on a Resource-bound
+        session (the DC answers with ``DestinationUnreachable: AddressFilter
+        mismatch at the EndpointDispatcher``). Used by the BadSuccessor
+        orchestrator for its Op 1 dMSA creation.
+        """
+        return cls(ip, domain, username, auth, "ResourceFactory")
 
     @classmethod
     def accounts_cap_client(cls, ip: str, domain: str, username: str, auth: ADWSAuthType) -> Self:

@@ -173,6 +173,52 @@ def gen_cli_args():
         help="Distinguished name of the context used by --adcap-change-feature. Defaults to CN=Partitions,CN=Configuration,<rootDN> (forest-level features like the Recycle Bin). Override for feature-specific contexts.",
     )
 
+    # BadSuccessor via ADWS (v1.5.0). Flag-based mode selector, same shape
+    # as the --adcap-* options above: --badsuccessor short-circuits the
+    # BloodHound collect pipeline in soaphound.py:main and runs the
+    # dedicated orchestrator instead. See README section "BadSuccessor via
+    # ADWS" and the design doc for the full operation list.
+    badsuccessor_group = parser.add_argument_group(
+        "badsuccessor options",
+        description="BadSuccessor via ADWS: three AD writes against the Resource/ResourceFactory endpoints on net.tcp:9389 to create a dMSA that supersedes a target principal. Based on Yuval Gordon / Akamai advisory (2024).",
+    )
+    badsuccessor_group.add_argument(
+        "--badsuccessor",
+        action="store_true",
+        help="Run the BadSuccessor ADWS orchestrator. Requires --target, --dmsa-cn and --dmsa-ou.",
+    )
+    badsuccessor_group.add_argument(
+        "--target",
+        metavar="DN",
+        action="store",
+        default=None,
+        help="Distinguished Name of the AD principal to supersede (written to msDS-ManagedAccountPrecededByLink on the new dMSA).",
+    )
+    badsuccessor_group.add_argument(
+        "--dmsa-cn",
+        metavar="CN",
+        action="store",
+        default=None,
+        help="Common name of the dMSA to create. sAMAccountName is derived as '<cn>$'.",
+    )
+    badsuccessor_group.add_argument(
+        "--dmsa-ou",
+        metavar="OU_DN",
+        action="store",
+        default=None,
+        help="Distinguished Name of the OU under which the dMSA is created. Caller must have Create Child for the msDS-DelegatedManagedServiceAccount class on this OU.",
+    )
+    badsuccessor_group.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="BadSuccessor only: render and log the three SOAP payloads without sending them. Useful for permission-matrix debugging and demos.",
+    )
+    badsuccessor_group.add_argument(
+        "--rollback",
+        action="store_true",
+        help="BadSuccessor only: on a failed Op 2 or Op 3, delete the partially-configured dMSA before exiting.",
+    )
+
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)

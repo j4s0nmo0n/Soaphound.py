@@ -213,3 +213,68 @@ LDAP_PUT_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-e
             </da:ModifyRequest>
         </s:Body>
     </s:Envelope>"""
+
+
+# ---------------------------------------------------------------------------
+# BadSuccessor via ADWS (v1.5.0) — WS-Transfer write templates.
+#
+# These two constants are intentionally empty placeholders. The actual SOAP
+# envelopes are kept in the design doc §8 and §10 and must be pasted here by
+# the implementer. Keeping them empty in the scaffolding commit avoids
+# landing attack-ready payloads before the design review of the feature has
+# been signed off.
+#
+# Note on Put: WS-Transfer Put is intentionally not re-templated here. The
+# attack re-uses the existing LDAP_PUT_FSTRING (above) via
+# ADWSConnect.put(), so there is no WS_TRANSFER_PUT_FSTRING.
+# ---------------------------------------------------------------------------
+
+# WS-Transfer Create against the ResourceFactory endpoint, carrying an
+# <da:IdentityManagementOperation> header and a DirectoryAccess
+# <AddRequest> body (Dialect XPath-Level-1). The plain <ad:AddRequest>
+# form is rejected by ADWS with ActionNotSupportedFault — this is the
+# format SOAPy's add_computer uses. One of two genuinely new SOAP
+# templates for v1.5.0 (the other being WS_TRANSFER_DELETE_FSTRING).
+# Format fields: dc_fqdn, message_id, atav_xml (pre-rendered block of
+# <AttributeTypeAndValue> entries, built by writers.ws_transfer_create).
+WS_TRANSFER_CREATE_FSTRING = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+    xmlns:wsa="http://www.w3.org/2005/08/addressing"
+    xmlns:ad="http://schemas.microsoft.com/2008/1/ActiveDirectory"
+    xmlns:addata="http://schemas.microsoft.com/2008/1/ActiveDirectory/Data"
+    xmlns:da="http://schemas.microsoft.com/2006/11/IdentityManagement/DirectoryAccess"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <s:Header>
+    <wsa:Action s:mustUnderstand="1">http://schemas.xmlsoap.org/ws/2004/09/transfer/Create</wsa:Action>
+    <da:IdentityManagementOperation s:mustUnderstand="1" />
+    <ad:instance>ldap:389</ad:instance>
+    <wsa:MessageID>urn:uuid:{message_id}</wsa:MessageID>
+    <wsa:ReplyTo>
+      <wsa:Address>http://www.w3.org/2005/08/addressing/anonymous</wsa:Address>
+    </wsa:ReplyTo>
+    <wsa:To s:mustUnderstand="1">net.tcp://{dc_fqdn}:9389/ActiveDirectoryWebServices/Windows/ResourceFactory</wsa:To>
+  </s:Header>
+  <s:Body>
+    <AddRequest Dialect="http://schemas.microsoft.com/2008/1/ActiveDirectory/Dialect/XPath-Level-1"
+                xmlns="http://schemas.microsoft.com/2006/11/IdentityManagement/DirectoryAccess">
+{atav_xml}
+    </AddRequest>
+  </s:Body>
+</s:Envelope>"""
+
+# WS-Transfer Delete against the Resource endpoint. One of two genuinely
+# new SOAP templates for v1.5.0 (the other being
+# WS_TRANSFER_CREATE_FSTRING); needed because ADWSConnect.delete() does
+# not exist in the project (confirmed in pre-flight). Format fields:
+# dc_fqdn, message_id, target_dn. Used by the BadSuccessor rollback path.
+WS_TRANSFER_DELETE_FSTRING = """<s:Envelope xmlns:a="http://www.w3.org/2005/08/addressing" xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:ad="http://schemas.microsoft.com/2008/1/ActiveDirectory">
+  <s:Header>
+    <a:Action s:mustUnderstand="1">http://schemas.xmlsoap.org/ws/2004/09/transfer/Delete</a:Action>
+    <a:To s:mustUnderstand="1">net.tcp://{dc_fqdn}:9389/ActiveDirectoryWebServices/Windows/Resource</a:To>
+    <ad:instance>ldap:389</ad:instance>
+    <ad:objectReferenceProperty>{target_dn}</ad:objectReferenceProperty>
+    <a:MessageID>urn:uuid:{message_id}</a:MessageID>
+    <a:ReplyTo><a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address></a:ReplyTo>
+  </s:Header>
+  <s:Body/>
+</s:Envelope>"""

