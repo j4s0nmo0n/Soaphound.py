@@ -272,37 +272,69 @@ def main():
         # talk HTTPS/443 to /ADPolicyProvider_CEP_Kerberos and
         # /<ca>_CES_Kerberos/service.svc/CES, authenticating with the ccache
         # pointed to by KRB5CCNAME via requests-gssapi + RFC 5929 CBT.
-        if getattr(options, "list_policies_ws", False):
-            from soaphound.adcs.xcep import DEFAULT_USER_AGENT, run_list_policies
+        if getattr(options, "list_policies_ws", False) or getattr(options, "enroll_ws", False):
+            from contextlib import nullcontext
+            from soaphound.adcs.kerb_tgt import inline_tgt_ccache
 
-            run_list_policies(
-                remote_name=options.domain_controller,
-                cep_url=getattr(options, "cep_url", None),
-                ca_name=getattr(options, "wstep_ca", None),
-                insecure_ssl=getattr(options, "insecure_ssl", False),
-                user_agent=getattr(options, "user_agent", None) or DEFAULT_USER_AGENT,
+            # When CLI creds are supplied, do an in-process AS-REQ via impacket
+            # and expose the TGT through a tempdir ccache that requests-gssapi
+            # can read. Without creds, fall back to the system ccache (user
+            # ran kinit beforehand or set KRB5CCNAME).
+            has_cli_creds = bool(
+                options.password or options.hashes or getattr(options, "aes_key", None)
             )
-            success = True
-            return
+            if has_cli_creds:
+                lm_hash, nt_hash = "", ""
+                if options.hashes:
+                    parts = options.hashes.split(":", 1)
+                    if len(parts) == 2:
+                        lm_hash, nt_hash = parts
+                    else:
+                        nt_hash = parts[0]
+                auth_ctx = inline_tgt_ccache(
+                    username=options.username,
+                    domain=options.domain,
+                    password=options.password,
+                    nt_hash=nt_hash or None,
+                    lm_hash=lm_hash or None,
+                    aes_key=getattr(options, "aes_key", None),
+                    kdc_ip=getattr(options, "kdc_ip", None) or options.domain_controller,
+                )
+            else:
+                auth_ctx = nullcontext()
 
-        if getattr(options, "enroll_ws", False):
-            from soaphound.adcs.wstep import run_enroll
-            from soaphound.adcs.xcep import DEFAULT_USER_AGENT
+            with auth_ctx:
+                if getattr(options, "list_policies_ws", False):
+                    from soaphound.adcs.xcep import DEFAULT_USER_AGENT, run_list_policies
 
-            run_enroll(
-                remote_name=options.domain_controller,
-                ces_url=getattr(options, "ces_url", None),
-                cep_url=getattr(options, "cep_url", None),
-                ca_name=getattr(options, "wstep_ca", None),
-                template_name=getattr(options, "wstep_template", None),
-                upn=getattr(options, "wstep_upn", None),
-                out_path=getattr(options, "wstep_out", None),
-                insecure_ssl=getattr(options, "insecure_ssl", False),
-                user_agent=getattr(options, "user_agent", None) or DEFAULT_USER_AGENT,
-                auth_dc=getattr(options, "auth_dc", None),
-            )
-            success = True
-            return
+                    run_list_policies(
+                        remote_name=options.domain_controller,
+                        cep_url=getattr(options, "cep_url", None),
+                        ca_name=getattr(options, "wstep_ca", None),
+                        insecure_ssl=getattr(options, "insecure_ssl", False),
+                        user_agent=getattr(options, "user_agent", None) or DEFAULT_USER_AGENT,
+                    )
+                    success = True
+                    return
+
+                if getattr(options, "enroll_ws", False):
+                    from soaphound.adcs.wstep import run_enroll
+                    from soaphound.adcs.xcep import DEFAULT_USER_AGENT
+
+                    run_enroll(
+                        remote_name=options.domain_controller,
+                        ces_url=getattr(options, "ces_url", None),
+                        cep_url=getattr(options, "cep_url", None),
+                        ca_name=getattr(options, "wstep_ca", None),
+                        template_name=getattr(options, "wstep_template", None),
+                        upn=getattr(options, "wstep_upn", None),
+                        out_path=getattr(options, "wstep_out", None),
+                        insecure_ssl=getattr(options, "insecure_ssl", False),
+                        user_agent=getattr(options, "user_agent", None) or DEFAULT_USER_AGENT,
+                        auth_dc=getattr(options, "auth_dc", None),
+                    )
+                    success = True
+                    return
 
         # 1. RootDSE query (Resource)
         adws_resource = ADWSConnect(options.domain_controller, options.domain, options.username, auth, "Resource")
