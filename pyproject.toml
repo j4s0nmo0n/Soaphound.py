@@ -31,6 +31,8 @@ dependencies = [
     "cryptography>=3.4.0",
     "ldap3>=2.9.0",
     "setuptools>=65.0",
+    "requests>=2.32.0",
+    "requests-gssapi>=1.4.0",
 ]
 
 [project.scripts]

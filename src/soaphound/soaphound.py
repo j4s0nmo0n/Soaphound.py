@@ -149,7 +149,22 @@ def main():
         # ------------------------------------------------------------------
         # Selection du mode d'authentification (NTLM ou Kerberos)
         # ------------------------------------------------------------------
-        if options.kerberos:
+        # WS-Trust enrollment primitives (--list-policies-ws / --enroll-ws)
+        # talk HTTPS/443 to AD CS and authenticate via requests-gssapi, which
+        # reads the system Kerberos cache directly (KRB5CCNAME). They do not
+        # consume the CLI credential flags, so the validation chain below
+        # must not reject them for lacking -u/-p/--hashes/-k. Add new
+        # auth-less primitives to STANDALONE_PRIMITIVES as they appear.
+        STANDALONE_PRIMITIVES = ("enroll_ws", "list_policies_ws")
+        is_standalone = any(getattr(options, name, False) for name in STANDALONE_PRIMITIVES)
+
+        if is_standalone:
+            logging.debug(
+                "Authentication skipped for standalone WS-Trust primitive "
+                "(uses system Kerberos ccache via requests-gssapi)."
+            )
+            auth = None
+        elif options.kerberos:
             # Mode Kerberos: on s'appuie sur le cache KRB5CCNAME.
             # Si le username est manquant, on l'extrait depuis le ccache.
             logging.debug('Authentication: Kerberos (KRB5CCNAME)')
@@ -248,6 +263,44 @@ def main():
                 )
                 result = tm_client.change_optional_feature(dn, options.adcap_change_feature, enable=True)
             print(json.dumps(result, indent=2, ensure_ascii=False))
+            success = True
+            return
+
+        # WS-Trust certificate enrollment dispatch (MS-XCEP + MS-WSTEP).
+        # Short-circuits the collect pipeline just like --adcap-* above: no
+        # RootDSE, no Enumeration session, no cache. The two primitives
+        # talk HTTPS/443 to /ADPolicyProvider_CEP_Kerberos and
+        # /<ca>_CES_Kerberos/service.svc/CES, authenticating with the ccache
+        # pointed to by KRB5CCNAME via requests-gssapi + RFC 5929 CBT.
+        if getattr(options, "list_policies_ws", False):
+            from soaphound.adcs.xcep import DEFAULT_USER_AGENT, run_list_policies
+
+            run_list_policies(
+                remote_name=options.domain_controller,
+                cep_url=getattr(options, "cep_url", None),
+                ca_name=getattr(options, "wstep_ca", None),
+                insecure_ssl=getattr(options, "insecure_ssl", False),
+                user_agent=getattr(options, "user_agent", None) or DEFAULT_USER_AGENT,
+            )
+            success = True
+            return
+
+        if getattr(options, "enroll_ws", False):
+            from soaphound.adcs.wstep import run_enroll
+            from soaphound.adcs.xcep import DEFAULT_USER_AGENT
+
+            run_enroll(
+                remote_name=options.domain_controller,
+                ces_url=getattr(options, "ces_url", None),
+                cep_url=getattr(options, "cep_url", None),
+                ca_name=getattr(options, "wstep_ca", None),
+                template_name=getattr(options, "wstep_template", None),
+                upn=getattr(options, "wstep_upn", None),
+                out_path=getattr(options, "wstep_out", None),
+                insecure_ssl=getattr(options, "insecure_ssl", False),
+                user_agent=getattr(options, "user_agent", None) or DEFAULT_USER_AGENT,
+                auth_dc=getattr(options, "auth_dc", None),
+            )
             success = True
             return
 

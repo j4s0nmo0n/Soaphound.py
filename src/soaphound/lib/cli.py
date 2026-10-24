@@ -173,6 +173,102 @@ def gen_cli_args():
         help="Distinguished name of the context used by --adcap-change-feature. Defaults to CN=Partitions,CN=Configuration,<rootDN> (forest-level features like the Recycle Bin). Override for feature-specific contexts.",
     )
 
+    # WS-Trust certificate enrollment (MS-XCEP + MS-WSTEP). Two flag-based
+    # entry points that short-circuit the BloodHound collect pipeline the
+    # same way --adcap-* does: AD CS enrollment against the HTTPS/443
+    # endpoints (/CEP and /<ca>_CES_Kerberos/service.svc/CES), independent
+    # from the ADWS session on net.tcp:9389.
+    wstep_group = parser.add_argument_group(
+        "WS-Trust enrollment (MS-XCEP + MS-WSTEP)",
+        description=(
+            "AD CS enrollment over HTTPS/Kerberos: list enrollment policies "
+            "via MS-XCEP GetPolicies, or issue a certificate via MS-WSTEP "
+            "RequestSecurityToken. Full-SOAP path, no DCOM."
+        ),
+    )
+    wstep_group.add_argument(
+        "--list-policies-ws",
+        dest="list_policies_ws",
+        action="store_true",
+        help="Query MS-XCEP GetPolicies and print the templates, OIDs and CA bundle.",
+    )
+    wstep_group.add_argument(
+        "--enroll-ws",
+        dest="enroll_ws",
+        action="store_true",
+        help="Issue a certificate via MS-WSTEP RequestSecurityToken (writes a 0600 PFX).",
+    )
+    wstep_group.add_argument(
+        "--cep-url",
+        dest="cep_url",
+        default=None,
+        metavar="URL",
+        help="Full MS-XCEP endpoint URL (default: derived from --ca and -dc).",
+    )
+    wstep_group.add_argument(
+        "--ces-url",
+        dest="ces_url",
+        default=None,
+        metavar="URL",
+        help="Full MS-WSTEP CES endpoint URL (default: derived from --ca and -dc).",
+    )
+    wstep_group.add_argument(
+        "--ca",
+        dest="wstep_ca",
+        default=None,
+        metavar="CA_NAME",
+        help="Short name of the Enterprise CA (e.g. 'jjk-CA'). Used to derive URLs.",
+    )
+    wstep_group.add_argument(
+        "--template",
+        dest="wstep_template",
+        default=None,
+        metavar="NAME",
+        help="Certificate template short name (e.g. 'ESC4Test'). Required with --enroll-ws.",
+    )
+    wstep_group.add_argument(
+        "--upn",
+        dest="wstep_upn",
+        default=None,
+        metavar="UPN",
+        help="Target UPN written to the CSR's SAN otherName (OID 1.3.6.1.4.1.311.20.2.3).",
+    )
+    wstep_group.add_argument(
+        "--out",
+        dest="wstep_out",
+        default=None,
+        metavar="PATH",
+        help="Output PFX path (mode 0600) for --enroll-ws.",
+    )
+    wstep_group.add_argument(
+        "--insecure-ssl",
+        dest="insecure_ssl",
+        action="store_true",
+        help="Disable TLS verification for CES/CEP (lab only).",
+    )
+    wstep_group.add_argument(
+        "--user-agent",
+        dest="user_agent",
+        default=None,
+        metavar="UA",
+        help=(
+            "Override User-Agent for MS-XCEP/MS-WSTEP requests "
+            "(default: Microsoft Web Services Client Protocol fingerprint, "
+            "matching certreq.exe)."
+        ),
+    )
+    wstep_group.add_argument(
+        "--auth-dc",
+        dest="auth_dc",
+        default=None,
+        metavar="IP_OR_FQDN",
+        help=(
+            "After successful --enroll-ws, chain certipy auth against the "
+            "given DC IP or FQDN to retrieve the NT hash. Requires certipy "
+            "in PATH. Example: --auth-dc 192.168.56.101"
+        ),
+    )
+
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)

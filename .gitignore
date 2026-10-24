@@ -37,6 +37,7 @@ htmlcov/
 bloodhound-*/
 *.ccache
 *.cache
+*.pfx
 *_users.json
 *_groups.json
 *_computers.json
@@ -103,3 +104,7 @@ src/soaphound_py.egg-info/
 *.egg-info/
 build/
 dist/
+
+# Personal working directories — notes, measurements, design reviews
+measurements/
+scratch/
