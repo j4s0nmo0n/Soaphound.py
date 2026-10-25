@@ -102,35 +102,52 @@ def _format_duration(seconds: float) -> str:
     return f"{hours}h {minutes}m {secs}s"
 
 
-_FOREST_LABEL_COL = 29
+_ADCAP_LABEL_COL = 29
+
+# Acronyms that must stay fully upper-cased after Python's ``str.title()``
+# downgrades them (e.g. "DN" -> "Dn", "SID" -> "Sid"). These show up in
+# every ADCAP table (DomainSID, ObjectGuid, PDCEmulator, ServerObjectDN,
+# NtdsSettingsObjectDN, InvocationId, OSName, …).
+_ADCAP_ACRONYMS: frozenset = frozenset({
+    "Dn", "Sid", "Guid", "Pdc", "Rid", "Ntds", "Spn", "Upn", "Dns",
+    "Ldap", "Ssl", "Fsmo", "Id", "Os", "Cn", "Ou", "Bios", "Ipv4", "Ipv6",
+})
 
 
 def _camel_to_label(name: str) -> str:
     """Split a PascalCase/CamelCase identifier into space-separated title
-    words, matching SOAPy's rendering: ``SPNSuffixes`` -> ``Spn Suffixes``,
-    ``ApplicationPartitions`` -> ``Application Partitions``.
+    words and preserve AD acronym casing: ``ApplicationPartitions`` ->
+    ``Application Partitions``, ``NtdsSettingsObjectDN`` ->
+    ``NTDS Settings Object DN``, ``DomainSID`` -> ``Domain SID``.
     """
     s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", name)
     s = re.sub(r"([a-z\d])([A-Z])", r"\1 \2", s)
-    return s.title()
+    s = s.title()
+    return " ".join(w.upper() if w in _ADCAP_ACRONYMS else w for w in s.split())
 
 
-def _format_forest_soapy_style(result: dict) -> str:
-    """Render a ``get_ad_forest`` result as SOAPy's human-readable table:
-    label column padded to a fixed width, multi-valued fields printed with
-    one value per line (subsequent lines indented to the value column),
-    empty collections / nil scalars rendered as ``None``. Fields are shown
-    in alphabetical order of their display label, which is what SOAPy does.
+def _format_adcap_dict_soapy_style(result: dict) -> str:
+    """Render an MS-ADCAP primitive result as a SOAPy-style aligned table:
+    label column auto-sized to the longest label (ensures one space before
+    the value even for long labels like
+    ``Foreign Security Principals Container:``), multi-value fields with
+    one value per line (subsequent lines indented), ``None`` / ``[]`` /
+    ``""`` collapsed to ``None``. Fields shown in alphabetical order of
+    their display label.
     """
     if "error" in result:
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     items = sorted(result.items(), key=lambda kv: _camel_to_label(kv[0]))
+    max_label = max(
+        (len(_camel_to_label(k)) + 1 for k, _ in items), default=0,
+    )
+    col = max(_ADCAP_LABEL_COL, max_label + 1)
+    pad = " " * col
     lines: list[str] = []
-    pad = " " * _FOREST_LABEL_COL
     for key, value in items:
         label = _camel_to_label(key) + ":"
-        head = f"{label:<{_FOREST_LABEL_COL}}"
+        head = f"{label:<{col}}"
         if isinstance(value, list):
             if not value:
                 lines.append(f"{head}None")
@@ -263,7 +280,10 @@ def main():
         # AccountManagement capability (MS-ADCAP sections 3.2 vs 3.3).
         if getattr(options, "adcap_get_forest", False) \
                 or getattr(options, "adcap_translate", None) \
-                or getattr(options, "adcap_change_feature", None):
+                or getattr(options, "adcap_change_feature", None) \
+                or getattr(options, "adcap_get_domain", False) \
+                or getattr(options, "adcap_get_dc", False) \
+                or getattr(options, "adcap_get_version", False):
             # <ca:Server> header rejects an IP literal with 'Instance invalid';
             # resolve to an FQDN before opening any CustomActions client.
             dc_fqdn = _resolve_dc_fqdn(options.domain_controller)
@@ -272,7 +292,44 @@ def main():
                     dc_fqdn, options.domain, options.username, auth,
                 )
                 result = tm_client.get_ad_forest()
-                print(_format_forest_soapy_style(result))
+                print(_format_adcap_dict_soapy_style(result))
+            elif getattr(options, "adcap_get_domain", False):
+                tm_client = ADWSConnect.topology_cap_client(
+                    dc_fqdn, options.domain, options.username, auth,
+                )
+                result = tm_client.get_ad_domain(
+                    identity=getattr(options, "adcap_identity", None),
+                )
+                print(_format_adcap_dict_soapy_style(result))
+            elif getattr(options, "adcap_get_dc", False):
+                ntds_dns = getattr(options, "adcap_ntds_settings_dn", []) or []
+                if not ntds_dns:
+                    logging.critical(
+                        "--adcap-get-dc requires at least one --adcap-ntds-settings-dn <DN>. "
+                        "Discover them with: ldapsearch -b CN=Sites,CN=Configuration,<rootDN> "
+                        "'(objectClass=nTDSDSA)' dn"
+                    )
+                    return
+                tm_client = ADWSConnect.topology_cap_client(
+                    dc_fqdn, options.domain, options.username, auth,
+                )
+                result = tm_client.get_ad_domain_controller(ntds_dns)
+                print(_format_adcap_dict_soapy_style(result))
+            elif getattr(options, "adcap_get_version", False):
+                tm_client = ADWSConnect.topology_cap_client(
+                    dc_fqdn, options.domain, options.username, auth,
+                )
+                result = tm_client.get_version()
+                if "error" in result:
+                    print(json.dumps(result, indent=2, ensure_ascii=False))
+                elif result.get("VersionString"):
+                    # Server-side string already reads "Active Directory Web
+                    # Services vX.Y" — print it as-is instead of wrapping it.
+                    print(result["VersionString"])
+                else:
+                    major = result.get("VersionMajor") or "?"
+                    minor = result.get("VersionMinor") or "?"
+                    print(f"Active Directory Web Services v{major}.{minor}")
             elif getattr(options, "adcap_translate", None):
                 am_client = ADWSConnect.account_cap_client(
                     dc_fqdn, options.domain, options.username, auth,

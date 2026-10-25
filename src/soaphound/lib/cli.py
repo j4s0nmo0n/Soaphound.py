@@ -165,12 +165,41 @@ def gen_cli_args():
         default=None,
         help="Call MS-ADCAP ChangeOptionalFeature for the optional feature GUID (enables it by default).",
     )
+    adcap_mex.add_argument(
+        "--adcap-get-domain",
+        action="store_true",
+        help="Call MS-ADCAP GetADDomain on the configured domain and render as a SOAPy-style aligned table.",
+    )
+    adcap_mex.add_argument(
+        "--adcap-get-dc",
+        action="store_true",
+        help="Call MS-ADCAP GetADDomainController and render as a SOAPy-style aligned table. Requires --adcap-ntds-settings-dn.",
+    )
+    adcap_mex.add_argument(
+        "--adcap-get-version",
+        action="store_true",
+        help="Call MS-ADCAP GetVersion (ADWS service fingerprint).",
+    )
     adcap_group.add_argument(
         "--adcap-change-feature-dn",
         metavar="DN",
         action="store",
         default=None,
         help="Distinguished name of the context used by --adcap-change-feature. Defaults to CN=Partitions,CN=Configuration,<rootDN> (forest-level features like the Recycle Bin). Override for feature-specific contexts.",
+    )
+    adcap_group.add_argument(
+        "--adcap-identity",
+        metavar="DN",
+        action="store",
+        default=None,
+        help="Optional identity (DN / NetBIOS / DNS name) for --adcap-get-domain; targets a specific child domain.",
+    )
+    adcap_group.add_argument(
+        "--adcap-ntds-settings-dn",
+        metavar="DN",
+        action="append",
+        default=[],
+        help="NTDS Settings DN for --adcap-get-dc (repeatable, required). Example: CN=NTDS Settings,CN=DC-01,CN=Servers,CN=Default-First-Site-Name,CN=Sites,CN=Configuration,DC=example,DC=local",
     )
 
     if len(sys.argv) == 1:

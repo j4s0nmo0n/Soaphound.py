@@ -315,5 +315,241 @@ class AdNameFormatNameTests(unittest.TestCase):
                 _ad_name_format_name(bad)
 
 
+class GetVersionTests(unittest.TestCase):
+    """ADWSConnect.get_version — scalar-only reply, single-line output."""
+
+    def test_sends_right_template_and_parses_three_scalars(self):
+        client = _build_cap_client("TopologyManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetVersionResponse>'
+            '<ca:VersionMajor>1</ca:VersionMajor>'
+            '<ca:VersionMinor>1</ca:VersionMinor>'
+            '<ca:VersionString>Active Directory Web Services v1.1</ca:VersionString>'
+            '</ca:GetVersionResponse>'
+        )
+        result = client.get_version()
+        sent = client._nmf.send.call_args[0][0]
+        self.assertIn("CustomActions/TopologyManagement/GetVersion</a:Action>", sent)
+        self.assertIn("<ca:GetVersionRequest/>", sent)
+        self.assertEqual(result, {
+            "VersionMajor": "1",
+            "VersionMinor": "1",
+            "VersionString": "Active Directory Web Services v1.1",
+        })
+
+    def test_tolerates_missing_fields(self):
+        client = _build_cap_client("TopologyManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetVersionResponse/>'
+        )
+        result = client.get_version()
+        self.assertEqual(result, {
+            "VersionMajor": "",
+            "VersionMinor": "",
+            "VersionString": "",
+        })
+
+
+class GetADDomainTests(unittest.TestCase):
+    """ADWSConnect.get_ad_domain — <Domain> wrapper, same shape as forest.
+    Also exercises DomainSID base64 → canonical SID decoding."""
+
+    def test_sends_right_template_and_parses_domain_wrapper(self):
+        client = _build_cap_client("TopologyManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADDomainResponse xmlns:i="http://www.w3.org/2001/XMLSchema-instance">'
+            '<ca:Domain>'
+            '<ca:AllowedDNSSuffixes i:nil="true"/>'
+            '<ca:AppliedGroupPolicies>'
+            '<sera:string>CN=Default Domain Policy,CN=Policies,CN=System,DC=example,DC=local</sera:string>'
+            '</ca:AppliedGroupPolicies>'
+            '<ca:ChildDomains>'
+            '<sera:string>sub.example.local</sera:string>'
+            '</ca:ChildDomains>'
+            '<ca:DNSRoot>example.local</ca:DNSRoot>'
+            '<ca:DistinguishedName>DC=example,DC=local</ca:DistinguishedName>'
+            '<ca:DomainMode>7</ca:DomainMode>'
+            # Base64 of a canonical SID — decoded by _decode_binary_sid_b64
+            '<ca:DomainSID>AQQAAAAAAAUVAAAAMvS+ZFce3OVQRHoW</ca:DomainSID>'
+            '<ca:Forest>example.local</ca:Forest>'
+            '<ca:InfrastructureMaster>DC-01.example.local</ca:InfrastructureMaster>'
+            '<ca:ManagedBy i:nil="true"/>'
+            '<ca:Name>example</ca:Name>'
+            '<ca:NetBIOSName>EXAMPLE</ca:NetBIOSName>'
+            '<ca:ObjectTypes>'
+            '<sera:string>domainDNS</sera:string>'
+            '</ca:ObjectTypes>'
+            '<ca:ParentDomain i:nil="true"/>'
+            '<ca:PDCEmulator>DC-01.example.local</ca:PDCEmulator>'
+            '<ca:RIDMaster>DC-01.example.local</ca:RIDMaster>'
+            '<ca:ReadOnlyReplicaDirectoryServer i:nil="true"/>'
+            '<ca:ReplicaDirectoryServer>'
+            '<sera:string>DC-01.example.local</sera:string>'
+            '<sera:string>DC-02.example.local</sera:string>'
+            '</ca:ReplicaDirectoryServer>'
+            '<ca:SubordinateReferences>'
+            '<sera:string>DC=ForestDnsZones,DC=example,DC=local</sera:string>'
+            '</ca:SubordinateReferences>'
+            '</ca:Domain>'
+            '</ca:GetADDomainResponse>'
+        )
+        result = client.get_ad_domain()
+        sent = client._nmf.send.call_args[0][0]
+        self.assertIn("CustomActions/TopologyManagement/GetADDomain</a:Action>", sent)
+        # Scalars survive
+        self.assertEqual(result["Name"], "example")
+        self.assertEqual(result["DNSRoot"], "example.local")
+        self.assertEqual(result["NetBIOSName"], "EXAMPLE")
+        self.assertEqual(result["PDCEmulator"], "DC-01.example.local")
+        # Arrays
+        self.assertEqual(result["ChildDomains"], ["sub.example.local"])
+        self.assertEqual(result["ReplicaDirectoryServer"],
+                         ["DC-01.example.local", "DC-02.example.local"])
+        self.assertEqual(result["ObjectTypes"], ["domainDNS"])
+        # Nil arrays normalise to []
+        self.assertEqual(result["AllowedDNSSuffixes"], [])
+        self.assertEqual(result["ReadOnlyReplicaDirectoryServer"], [])
+        # Nil scalars stay None
+        self.assertIsNone(result["ManagedBy"])
+        self.assertIsNone(result["ParentDomain"])
+        # Base64 DomainSID decoded to canonical form
+        self.assertTrue(result["DomainSID"].startswith("S-1-5-21-"))
+
+    def test_identity_added_to_body_when_supplied(self):
+        client = _build_cap_client("TopologyManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADDomainResponse>'
+            '<ca:Domain><ca:Name>example</ca:Name></ca:Domain>'
+            '</ca:GetADDomainResponse>'
+        )
+        client.get_ad_domain(identity="example.local")
+        sent = client._nmf.send.call_args[0][0]
+        self.assertIn("<ca:Identity>example.local</ca:Identity>", sent)
+
+    def test_identity_omitted_by_default(self):
+        client = _build_cap_client("TopologyManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADDomainResponse>'
+            '<ca:Domain><ca:Name>example</ca:Name></ca:Domain>'
+            '</ca:GetADDomainResponse>'
+        )
+        client.get_ad_domain()
+        sent = client._nmf.send.call_args[0][0]
+        self.assertNotIn("<ca:Identity>", sent)
+
+
+class GetADDomainControllerTests(unittest.TestCase):
+    """ADWSConnect.get_ad_domain_controller — mandatory NtdsSettingsDN
+    (empirical server-side requirement), DomainControllers plural wrapper
+    containing <ActiveDirectoryDomainController>, OperationMasterRole
+    nested array flattening."""
+
+    def test_empty_ntds_settings_dn_raises_before_any_network_call(self):
+        client = _build_cap_client("TopologyManagement")
+        with self.assertRaises(ValueError):
+            client.get_ad_domain_controller([])
+        client._nmf.send.assert_not_called()
+
+    def test_body_wraps_each_dn_in_a_b_string_element(self):
+        client = _build_cap_client("TopologyManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADDomainControllerResponse>'
+            '<ca:DomainControllers>'
+            '<ca:ActiveDirectoryDomainController><ca:Name>DC-01</ca:Name></ca:ActiveDirectoryDomainController>'
+            '</ca:DomainControllers>'
+            '</ca:GetADDomainControllerResponse>'
+        )
+        dns = [
+            "CN=NTDS Settings,CN=DC-01,CN=Servers,CN=Site1,CN=Sites,CN=Configuration,DC=example,DC=local",
+            "CN=NTDS Settings,CN=DC-02,CN=Servers,CN=Site1,CN=Sites,CN=Configuration,DC=example,DC=local",
+        ]
+        client.get_ad_domain_controller(dns)
+        sent = client._nmf.send.call_args[0][0]
+        self.assertIn("CustomActions/TopologyManagement/GetADDomainController</a:Action>", sent)
+        self.assertIn("<ca:NtdsSettingsDN", sent)
+        for dn in dns:
+            self.assertIn(f"<b:string>{dn}</b:string>", sent)
+
+    def test_parses_scalars_arrays_and_operation_master_role_flatten(self):
+        """``<OperationMasterRole>`` wraps repeated typed children (NOT
+        <string>) — must flatten to list of role names.
+        ``<Partitions>`` wraps repeated ``<string>`` — list of DNs."""
+        client = _build_cap_client("TopologyManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADDomainControllerResponse xmlns:i="http://www.w3.org/2001/XMLSchema-instance">'
+            '<ca:DomainControllers>'
+            '<ca:ActiveDirectoryDomainController>'
+            '<ca:Name>DC-01</ca:Name>'
+            '<ca:HostName>DC-01.example.local</ca:HostName>'
+            '<ca:Enabled>true</ca:Enabled>'
+            '<ca:IsGlobalCatalog>true</ca:IsGlobalCatalog>'
+            '<ca:IsReadOnly>false</ca:IsReadOnly>'
+            '<ca:LdapPort>389</ca:LdapPort>'
+            '<ca:SslPort>636</ca:SslPort>'
+            '<ca:OsHotFix i:nil="true"/>'
+            '<ca:OperationMasterRole>'
+            '<ca:ActiveDirectoryOperationMasterRole>SchemaMaster</ca:ActiveDirectoryOperationMasterRole>'
+            '<ca:ActiveDirectoryOperationMasterRole>DomainNamingMaster</ca:ActiveDirectoryOperationMasterRole>'
+            '<ca:ActiveDirectoryOperationMasterRole>PDCEmulator</ca:ActiveDirectoryOperationMasterRole>'
+            '<ca:ActiveDirectoryOperationMasterRole>RIDMaster</ca:ActiveDirectoryOperationMasterRole>'
+            '<ca:ActiveDirectoryOperationMasterRole>InfrastructureMaster</ca:ActiveDirectoryOperationMasterRole>'
+            '</ca:OperationMasterRole>'
+            '<ca:Partitions xmlns:b="http://schemas.microsoft.com/2003/10/Serialization/Arrays">'
+            '<b:string>DC=example,DC=local</b:string>'
+            '<b:string>CN=Configuration,DC=example,DC=local</b:string>'
+            '</ca:Partitions>'
+            '<ca:Site>Default-First-Site-Name</ca:Site>'
+            '</ca:ActiveDirectoryDomainController>'
+            '</ca:DomainControllers>'
+            '</ca:GetADDomainControllerResponse>'
+        )
+        result = client.get_ad_domain_controller([
+            "CN=NTDS Settings,CN=DC-01,CN=Servers,CN=Default-First-Site-Name,CN=Sites,CN=Configuration,DC=example,DC=local",
+        ])
+        self.assertEqual(result["Name"], "DC-01")
+        self.assertEqual(result["HostName"], "DC-01.example.local")
+        self.assertEqual(result["Enabled"], "true")
+        self.assertEqual(result["LdapPort"], "389")
+        self.assertEqual(result["SslPort"], "636")
+        self.assertEqual(result["Site"], "Default-First-Site-Name")
+        self.assertIsNone(result["OsHotFix"])
+        self.assertEqual(
+            result["OperationMasterRole"],
+            ["SchemaMaster", "DomainNamingMaster",
+             "PDCEmulator", "RIDMaster", "InfrastructureMaster"],
+        )
+        self.assertEqual(
+            result["Partitions"],
+            ["DC=example,DC=local", "CN=Configuration,DC=example,DC=local"],
+        )
+
+
+class DecodeBinarySidTests(unittest.TestCase):
+    """_decode_binary_sid_b64 — base64 binary SID → canonical dotted form."""
+
+    def test_decodes_base64_binary_sid_to_canonical(self):
+        from base64 import b64encode
+        from impacket.ldap.ldaptypes import LDAP_SID
+        from soaphound.ad.adws import _decode_binary_sid_b64
+        sid = LDAP_SID()
+        sid.fromCanonical("S-1-5-21-1687579186-3856638039-375210320")
+        wire = b64encode(sid.getData()).decode()
+        self.assertEqual(
+            _decode_binary_sid_b64(wire),
+            "S-1-5-21-1687579186-3856638039-375210320",
+        )
+
+    def test_passes_through_already_canonical_sid(self):
+        from soaphound.ad.adws import _decode_binary_sid_b64
+        self.assertEqual(
+            _decode_binary_sid_b64("S-1-5-21-1-2-3"),
+            "S-1-5-21-1-2-3",
+        )
+
+    def test_passes_through_empty_string(self):
+        from soaphound.ad.adws import _decode_binary_sid_b64
+        self.assertEqual(_decode_binary_sid_b64(""), "")
+
+
 if __name__ == "__main__":
     unittest.main()

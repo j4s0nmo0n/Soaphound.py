@@ -182,6 +182,69 @@ TM_CHANGE_OPTIONAL_FEATURE_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.
     </s:Body>
 </s:Envelope>"""
 
+# TM_GET_VERSION — ADWS service fingerprint. Empty body, scalars-only reply
+# (VersionMajor / VersionMinor / VersionString). Cheapest end-to-end health
+# check against the TopologyManagement endpoint.
+TM_GET_VERSION_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+    xmlns:a="http://www.w3.org/2005/08/addressing"
+    xmlns:ca="http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions">
+    <s:Header>
+        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions/TopologyManagement/GetVersion</a:Action>
+        <ca:Server>ldap:389</ca:Server>
+        <a:MessageID>urn:uuid:{uuid}</a:MessageID>
+        <a:ReplyTo>
+            <a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
+        </a:ReplyTo>
+        <a:To s:mustUnderstand="1">net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/TopologyManagement</a:To>
+    </s:Header>
+    <s:Body>
+        <ca:GetVersionRequest/>
+    </s:Body>
+</s:Envelope>"""
+
+# TM_GET_AD_DOMAIN — returns a <Domain> wrapper with the same shape as the
+# <Forest> wrapper used by GetADForest (scalars + ser:string arrays +
+# xsi:nil). The optional <ca:Identity> targets a specific child domain.
+TM_GET_AD_DOMAIN_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+    xmlns:a="http://www.w3.org/2005/08/addressing"
+    xmlns:ca="http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions">
+    <s:Header>
+        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions/TopologyManagement/GetADDomain</a:Action>
+        <ca:Server>ldap:389</ca:Server>
+        <a:MessageID>urn:uuid:{uuid}</a:MessageID>
+        <a:ReplyTo>
+            <a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
+        </a:ReplyTo>
+        <a:To s:mustUnderstand="1">net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/TopologyManagement</a:To>
+    </s:Header>
+    <s:Body>
+        <ca:GetADDomainRequest>{identity_block}</ca:GetADDomainRequest>
+    </s:Body>
+</s:Envelope>"""
+
+# TM_GET_AD_DOMAIN_CONTROLLER — NtdsSettingsDN is MANDATORY despite the WSDL
+# marking it optional (empirical: server rejects an empty request with an
+# ArgumentError on this parameter). Each DN goes in a <b:string> item under
+# the <ca:NtdsSettingsDN> wrapper.
+TM_GET_AD_DOMAIN_CONTROLLER_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+    xmlns:a="http://www.w3.org/2005/08/addressing"
+    xmlns:ca="http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions">
+    <s:Header>
+        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions/TopologyManagement/GetADDomainController</a:Action>
+        <ca:Server>ldap:389</ca:Server>
+        <a:MessageID>urn:uuid:{uuid}</a:MessageID>
+        <a:ReplyTo>
+            <a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
+        </a:ReplyTo>
+        <a:To s:mustUnderstand="1">net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/TopologyManagement</a:To>
+    </s:Header>
+    <s:Body>
+        <ca:GetADDomainControllerRequest>
+            <ca:NtdsSettingsDN xmlns:b="http://schemas.microsoft.com/2003/10/Serialization/Arrays">{ntds_string_items}</ca:NtdsSettingsDN>
+        </ca:GetADDomainControllerRequest>
+    </s:Body>
+</s:Envelope>"""
+
 
 LDAP_PUT_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
         xmlns:a="http://www.w3.org/2005/08/addressing"

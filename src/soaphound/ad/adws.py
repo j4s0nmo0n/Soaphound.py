@@ -29,6 +29,9 @@ from .soap_templates import (
     TM_GET_AD_FOREST_FSTRING,
     TM_TRANSLATE_NAME_FSTRING,
     TM_CHANGE_OPTIONAL_FEATURE_FSTRING,
+    TM_GET_VERSION_FSTRING,
+    TM_GET_AD_DOMAIN_FSTRING,
+    TM_GET_AD_DOMAIN_CONTROLLER_FSTRING,
 )
 
 # MS-ADCAP ActiveDirectoryNameFormat enum (per [MS-ADCAP] Appendix A). Only
@@ -73,50 +76,147 @@ def _parse_ad_forest_payload(payload) -> dict:
     XMLSchema-instance for ``nil``). This mirrors SOAPy's regex-based
     approach (SOAPy ``src/adcap.py`` ``get_ad_forest``).
     """
+    return _parse_wrapped_payload(payload, ("Forest", "GetADForestResult"), _FOREST_ARRAY_FIELDS)
+
+
+# Multi-valued fields in the MS-ADCAP ``GetADDomain`` response (observed
+# empirically on Windows Server 2025: live server uses ``AllowedDNSSuffixes``,
+# etc.). Same normalisation rule as the forest fields: nil or empty wrapper
+# collapses to [].
+_DOMAIN_ARRAY_FIELDS: frozenset = frozenset({
+    "AllowedDNSSuffixes",
+    "AppliedGroupPolicies",
+    "ChildDomains",
+    "ObjectTypes",
+    "ReadOnlyReplicaDirectoryServer",
+    "ReplicaDirectoryServer",
+    "SubordinateReferences",
+})
+
+
+def _is_nil(elem) -> bool:
+    """True if the element carries any ``nil="true"`` attribute (any
+    namespace: ``i:nil``, ``xsi:nil``, …)."""
+    for k, v in elem.attrib.items():
+        if _localname_from_tag(k) == "nil" and v == "true":
+            return True
+    return False
+
+
+def _parse_wrapped_payload(payload, wrapper_names: tuple, array_fields: frozenset) -> dict:
+    """Generic ADCAP parser for a response shaped like
+    ``<Response><Wrapper>...fields...</Wrapper></Response>``.
+
+    Descends into whichever ``wrapper_names`` element appears first,
+    falling back to the payload's own children. For each child:
+      - ``nil="true"`` → ``[]`` if the local name is in ``array_fields``,
+        else ``None``;
+      - any ``<string>`` descendant → list of their text() values;
+      - local name in ``array_fields`` but no ``<string>`` child → ``[]``;
+      - plain text → str (stripped), or ``None`` when empty.
+    """
     def _localname(elem):
         return _localname_from_tag(elem.tag)
 
-    def _is_nil(elem):
-        for k, v in elem.attrib.items():
-            if _localname_from_tag(k) == "nil" and v == "true":
-                return True
-        return False
-
-    # The live server wraps the fields in <Forest> inside <GetADForestResponse>;
-    # the WSDL/legacy contract wraps them in <GetADForestResult> instead.
-    # Descend into whichever is present, else iterate the payload's own
-    # children (keeps the function robust if the wrapper ever disappears
-    # or the caller already stripped it).
-    forest = None
+    wrapper = None
     for descendant in payload.iter():
-        if _localname(descendant) in ("Forest", "GetADForestResult"):
-            forest = descendant
+        if _localname(descendant) in wrapper_names:
+            wrapper = descendant
             break
-    if forest is None:
-        forest = payload
+    if wrapper is None:
+        wrapper = payload
 
     out: dict = {}
-    for child in forest:
+    for child in wrapper:
+        tag = _localname(child)
+        if _is_nil(child):
+            out[tag] = [] if tag in array_fields else None
+            continue
+        string_children = [sub for sub in child.iter() if _localname(sub) == "string"]
+        if string_children:
+            out[tag] = [sub.text for sub in string_children if sub.text]
+            continue
+        if tag in array_fields:
+            out[tag] = []
+            continue
+        text = (child.text or "").strip() if child.text else ""
+        out[tag] = text if text else None
+    return out
+
+
+def _parse_ad_domain_payload(payload) -> dict:
+    """Parse a GetADDomain response payload (shape mirrors GetADForest with
+    a ``<Domain>`` wrapper instead of ``<Forest>``)."""
+    return _parse_wrapped_payload(payload, ("Domain", "GetADDomainResult"), _DOMAIN_ARRAY_FIELDS)
+
+
+def _parse_dc_payload(payload) -> dict:
+    """Parse a GetADDomainController response payload into a structured dict.
+
+    The server wraps results in ``<DomainControllers>`` (plural) containing
+    one or more ``<ActiveDirectoryDomainController>`` entries — the latter is
+    the field-bearing wrapper. It carries scalars, ``<string>`` arrays
+    (``<Partitions>``) and nested typed-element arrays
+    (``<OperationMasterRole>`` wraps repeated
+    ``<ActiveDirectoryOperationMasterRole>`` children — flattened to a list
+    of their text() values). Only the first ``<ActiveDirectoryDomainController>``
+    is returned; callers that need multi-DC results should iterate the
+    response themselves.
+    """
+    def _localname(elem):
+        return _localname_from_tag(elem.tag)
+
+    wrapper = None
+    for descendant in payload.iter():
+        if _localname(descendant) == "ActiveDirectoryDomainController":
+            wrapper = descendant
+            break
+    if wrapper is None:
+        wrapper = payload
+
+    out: dict = {}
+    for child in wrapper:
         tag = _localname(child)
 
         if _is_nil(child):
-            out[tag] = [] if tag in _FOREST_ARRAY_FIELDS else None
+            out[tag] = None
             continue
 
-        # Any descendant named "string" (any namespace) is a list element.
         string_children = [sub for sub in child.iter() if _localname(sub) == "string"]
         if string_children:
             out[tag] = [sub.text for sub in string_children if sub.text]
             continue
 
-        if tag in _FOREST_ARRAY_FIELDS:
-            out[tag] = []
+        # Nested typed-element array (e.g. OperationMasterRole wrapping
+        # repeated ActiveDirectoryOperationMasterRole items). Any direct
+        # child element with text() is treated as a list item.
+        direct_children = list(child)
+        if direct_children:
+            out[tag] = [sub.text for sub in direct_children if sub.text]
             continue
 
         text = (child.text or "").strip() if child.text else ""
         out[tag] = text if text else None
 
     return out
+
+
+def _decode_binary_sid_b64(value: str) -> str:
+    """Decode a base64-encoded binary SID (``xs:base64Binary``) to its
+    canonical ``S-1-5-…`` form. The server ships ``DomainSID`` this way.
+
+    Returns the input unchanged on decode failure so fixtures carrying a
+    pre-decoded dotted SID (and any future server that already decodes
+    server-side) pass through untouched.
+    """
+    if not value:
+        return value
+    try:
+        from base64 import b64decode
+        from impacket.ldap.ldaptypes import LDAP_SID
+        return LDAP_SID(b64decode(value)).formatCanonical()
+    except Exception:
+        return value
 
 
 def _ad_name_format_name(value: "int | str") -> str:
@@ -983,6 +1083,110 @@ class ADWSConnect:
         if payload is None:
             payload = result
         return _parse_ad_forest_payload(payload)
+
+    def get_version(self) -> dict:
+        """Call MS-ADCAP ``GetVersion``.
+
+        Fingerprints the ADWS service version advertised by the DC (useful
+        to distinguish Windows Server builds and as the cheapest end-to-end
+        health check of the TopologyManagement endpoint).
+
+        Returns:
+            A dict with ``VersionMajor`` (str), ``VersionMinor`` (str),
+            ``VersionString`` (str), or ``{"error": ..., "detail": ...}``
+            on SOAP Fault.
+        """
+        self._tm_require_endpoint()
+        soap = TM_GET_VERSION_FSTRING.format(uuid=str(uuid4()), fqdn=self._fqdn)
+        result = self._tm_fault_or_tree(soap)
+        if isinstance(result, dict):
+            return result
+        ca_ns = NAMESPACES["ca"]
+        out: dict = {}
+        for tag in ("VersionMajor", "VersionMinor", "VersionString"):
+            elem = result.find(f".//{{{ca_ns}}}{tag}")
+            if elem is None:
+                # Fallback: match by local name regardless of namespace prefix.
+                for leaf in result.iter():
+                    if _localname_from_tag(leaf.tag) == tag:
+                        elem = leaf
+                        break
+            out[tag] = (elem.text or "").strip() if elem is not None and elem.text else ""
+        return out
+
+    def get_ad_domain(self, identity: str | None = None) -> dict:
+        """Call MS-ADCAP ``GetADDomain``.
+
+        Returns the domain object hosted by the contacted DC, or the domain
+        identified by ``identity`` when supplied (DN / NetBIOS / DNS name).
+        Response shape mirrors ``GetADForest`` with a ``<Domain>`` wrapper.
+
+        Returns:
+            A dict with the parsed Domain fields (array fields default to
+            ``[]`` when empty, nullable scalars to ``None``), or
+            ``{"error": ..., "detail": ...}`` on SOAP Fault. ``DomainSID``
+            is decoded to canonical ``S-1-5-…`` form.
+        """
+        self._tm_require_endpoint()
+        identity_block = f"<ca:Identity>{identity}</ca:Identity>" if identity else ""
+        soap = TM_GET_AD_DOMAIN_FSTRING.format(
+            uuid=str(uuid4()), fqdn=self._fqdn, identity_block=identity_block,
+        )
+        result = self._tm_fault_or_tree(soap)
+        if isinstance(result, dict):
+            return result
+        ca_ns = NAMESPACES["ca"]
+        payload = result.find(f".//{{{ca_ns}}}GetADDomainResponse")
+        if payload is None:
+            payload = result.find(f".//{{{ca_ns}}}GetADDomainResult")
+        if payload is None:
+            payload = result
+        parsed = _parse_ad_domain_payload(payload)
+        if parsed.get("DomainSID"):
+            parsed["DomainSID"] = _decode_binary_sid_b64(parsed["DomainSID"])
+        return parsed
+
+    def get_ad_domain_controller(self, ntds_settings_dn: list) -> dict:
+        """Call MS-ADCAP ``GetADDomainController``.
+
+        The server rejects empty requests with an ArgumentError on the
+        ``NtdsSettingsDN`` parameter even though the WSDL marks it optional
+        (observed empirically). Caller MUST supply at least one DN of the
+        form ``CN=NTDS Settings,CN=<DC>,CN=Servers,CN=<Site>,CN=Sites,
+        CN=Configuration,<rootDN>``. Discoverable via LDAP or by inspecting
+        ``ReplicaDirectoryServer`` from a prior ``get_ad_forest`` /
+        ``get_ad_domain``.
+
+        Args:
+            ntds_settings_dn: non-empty list of NTDS Settings DNs.
+
+        Returns:
+            A dict with the parsed DomainController fields, or
+            ``{"error": ..., "detail": ...}`` on SOAP Fault.
+        """
+        self._tm_require_endpoint()
+        if not ntds_settings_dn:
+            raise ValueError(
+                "ntds_settings_dn must be a non-empty list of DN strings "
+                "(the server rejects an empty NtdsSettingsDN with an "
+                "ArgumentError even though the WSDL marks it optional)"
+            )
+        ntds_string_items = "".join(
+            f"<b:string>{dn}</b:string>" for dn in ntds_settings_dn
+        )
+        soap = TM_GET_AD_DOMAIN_CONTROLLER_FSTRING.format(
+            uuid=str(uuid4()), fqdn=self._fqdn, ntds_string_items=ntds_string_items,
+        )
+        result = self._tm_fault_or_tree(soap)
+        if isinstance(result, dict):
+            return result
+        ca_ns = NAMESPACES["ca"]
+        payload = result.find(f".//{{{ca_ns}}}GetADDomainControllerResponse")
+        if payload is None:
+            payload = result.find(f".//{{{ca_ns}}}GetADDomainControllerResult")
+        if payload is None:
+            payload = result
+        return _parse_dc_payload(payload)
 
     def translate_name(self, name: str, format_offered: int = 1, format_desired: int = 2) -> dict:
         """Call MS-ADCAP ``TranslateName``.
