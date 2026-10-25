@@ -147,7 +147,7 @@ def main():
         kdc_host = getattr(options, 'kdc_ip', None) or options.domain_controller
 
         # ------------------------------------------------------------------
-        # Selection du mode d'authentification (NTLM ou Kerberos)
+        # Authentication mode selection (NTLM or Kerberos)
         # ------------------------------------------------------------------
         # WS-Trust enrollment primitives (--list-policies-ws / --enroll-ws)
         # talk HTTPS/443 to AD CS and authenticate via requests-gssapi, which
@@ -165,8 +165,8 @@ def main():
             )
             auth = None
         elif options.kerberos:
-            # Mode Kerberos: on s'appuie sur le cache KRB5CCNAME.
-            # Si le username est manquant, on l'extrait depuis le ccache.
+            # Kerberos mode: rely on the KRB5CCNAME ccache.
+            # If the username is missing, extract it from the ccache.
             logging.debug('Authentication: Kerberos (KRB5CCNAME)')
 
             krb5cc = os.getenv('KRB5CCNAME')
@@ -187,18 +187,18 @@ def main():
                     )
                     if not options.username and ccache_user:
                         options.username = ccache_user
-                        logging.debug('Username extrait du ccache: %s', options.username)
+                        logging.debug('Username extracted from ccache: %s', options.username)
                     if not options.domain and ccache_domain:
                         options.domain = ccache_domain
-                        logging.debug('Domain extrait du ccache: %s', options.domain)
+                        logging.debug('Domain extracted from ccache: %s', options.domain)
                 except Exception as e:
-                    logging.debug("Impossible de parser le ccache: %s", e)
+                    logging.debug("Unable to parse ccache: %s", e)
 
             if not options.username:
-                logging.critical("Username introuvable: passez -u ou utilisez un ccache contenant un principal valide.")
+                logging.critical("Username not found: pass -u or use a ccache that contains a valid principal.")
                 sys.exit(1)
             if not options.domain:
-                logging.critical("Domaine introuvable: passez -d ou utilisez un ccache contenant un principal valide.")
+                logging.critical("Domain not found: pass -d or use a ccache that contains a valid principal.")
                 sys.exit(1)
 
             auth = KerberosAuth(kdc_host=kdc_host)
@@ -617,11 +617,11 @@ def main():
                 )
                 try:
                     if not smb_auth.load_ccache():
-                        logging.warning("Impossible de charger un TGT depuis le ccache. "
+                        logging.warning("Unable to load a TGT from the ccache. "
                                         "SMB session collection may fail. "
                                         "Verify KRB5CCNAME and the ticket validity.")
                 except Exception as e:
-                    logging.warning("Erreur lors du chargement du ccache: %s", e)
+                    logging.warning("Error while loading the ccache: %s", e)
             else:
                 smb_auth = ADAuthentication(username=options.username, password=options.password, domain=options.domain, lm_hash=lm, nt_hash=nt, aeskey=aeskey, kdc=options.domain_controller)
 

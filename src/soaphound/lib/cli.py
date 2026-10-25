@@ -36,7 +36,7 @@ def gen_cli_args():
                         '--domain',
                         action='store',
                         required=False,
-                        help='Domain to query (extrait du ccache en mode -k si non fourni).')
+                        help='Domain to query (extracted from the ccache in -k mode if not provided).')
     parser.add_argument('-v',
                         action='store_true',
                         help='Enable verbose output.')
@@ -44,7 +44,7 @@ def gen_cli_args():
     parser.add_argument("--ts", action="store_true", help="Add timestamp to logs.")
 
 
-    helptext = 'NTLM (utilisateur/mot de passe ou hash NT) ou Kerberos (-k via KRB5CCNAME).'
+    helptext = 'NTLM (username/password or NT hash) or Kerberos (-k via KRB5CCNAME).'
 
     auopts = parser.add_argument_group('authentication options', description=helptext)
     auopts.add_argument('-u',

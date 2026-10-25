@@ -210,9 +210,9 @@ class NTLMAuth(ADWSAuthType):
 
 class KerberosAuth(ADWSAuthType):
     """
-    Authentification Kerberos via le cache d'identifiants KRB5CCNAME.
+    Kerberos authentication via the KRB5CCNAME credential cache.
     The ticket (TGT or LDAP TGS) must be present in the ccache pointed to by
-    la variable d'environnement KRB5CCNAME.
+    the KRB5CCNAME environment variable.
     """
     def __init__(self, kdc_host: str | None = None):
         # KDC host to query for an LDAP TGS if only a TGT
@@ -229,11 +229,11 @@ class ADWSConnect:
         self._nmf: ms_nmf.NMFConnection = self._connect(self._fqdn, self._resource)
 
     def _create_NNS_from_auth(self, sock: socket.socket) -> NNS:
-        # Authentification NTLM (mot de passe ou hash NT)
+        # NTLM authentication (password or NT hash)
         if isinstance(self._auth, NTLMAuth):
             return NNS(socket=sock, fqdn=self._fqdn, domain=self._domain, username=self._username,
                        password=self._auth.password, nt=self._auth.nt if self._auth.nt else "")
-        # Authentification Kerberos via ccache (KRB5CCNAME)
+        # Kerberos authentication via ccache (KRB5CCNAME)
         if isinstance(self._auth, KerberosAuth):
             return NNS(
                 socket=sock,

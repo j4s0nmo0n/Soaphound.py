@@ -254,7 +254,7 @@ class ComputerEnumerator(MembershipEnumerator):
                             self.addomain.samcache.put(ses['username'], users)
                         else:
                             logging.warning('Failed to resolve SAM name %s in current forest', ses['user'])
-                            continue  # On ne traite pas cette session si l'utilisateur est inconnu
+                            continue  # Skip this session when the user is unknown
 
                     # users must now exist and be non-empty
                     if not users:
