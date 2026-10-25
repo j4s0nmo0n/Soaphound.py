@@ -149,7 +149,7 @@ def gen_cli_args():
     adcap_mex.add_argument(
         "--adcap-get-forest",
         action="store_true",
-        help="Call MS-ADCAP GetADForest on the configured domain and print the response as JSON.",
+        help="Call MS-ADCAP GetADForest on the configured domain and print the response as a SOAPy-style aligned table.",
     )
     adcap_mex.add_argument(
         "--adcap-translate",

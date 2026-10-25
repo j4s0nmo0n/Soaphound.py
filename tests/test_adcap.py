@@ -86,6 +86,89 @@ class AdcapDispatchTests(unittest.TestCase):
         self.assertEqual(result.get("ForestMode"), "Windows2016Forest")
         self.assertEqual(result.get("RootDomain"), "example.local")
 
+    def test_get_ad_forest_collects_arrayof_string_wrappers(self):
+        """Multi-valued fields (Sites, Domains, ApplicationPartitions, ...)
+        wrap their values in Microsoft's ArrayOf* with ``<a:string>`` children.
+        Each wrapper must land as a list under its parent name — the old flat
+        iter() implementation overwrote them with a single ``"string": "..."``
+        key and lost the parent name entirely."""
+        client = _build_cap_client("TopologyManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADForestResponse>'
+            '<ca:GetADForestResult>'
+            '<ca:Name>example.local</ca:Name>'
+            '<ca:RootDomain>example.local</ca:RootDomain>'
+            '<ca:ForestMode>10</ca:ForestMode>'
+            '<ca:SchemaMaster>DC-01.example.local</ca:SchemaMaster>'
+            '<ca:DomainNamingMaster>DC-01.example.local</ca:DomainNamingMaster>'
+            '<ca:ApplicationPartitions>'
+            '<sera:string>DC=DomainDnsZones,DC=example,DC=local</sera:string>'
+            '<sera:string>DC=DomainDnsZones,DC=sub,DC=example,DC=local</sera:string>'
+            '<sera:string>DC=ForestDnsZones,DC=example,DC=local</sera:string>'
+            '</ca:ApplicationPartitions>'
+            '<ca:Domains>'
+            '<sera:string>example.local</sera:string>'
+            '<sera:string>sub.example.local</sera:string>'
+            '</ca:Domains>'
+            '<ca:GlobalCatalogs>'
+            '<sera:string>DC-01.example.local</sera:string>'
+            '<sera:string>DC-02.sub.example.local</sera:string>'
+            '</ca:GlobalCatalogs>'
+            '<ca:Sites>'
+            '<sera:string>Default-First-Site-Name</sera:string>'
+            '</ca:Sites>'
+            '<ca:UpnSuffixes/>'
+            '<ca:SpnSuffixes/>'
+            '<ca:CrossForestReferences/>'
+            '</ca:GetADForestResult>'
+            '</ca:GetADForestResponse>'
+        )
+
+        result = client.get_ad_forest()
+
+        # Scalars survive.
+        self.assertEqual(result["Name"], "example.local")
+        self.assertEqual(result["RootDomain"], "example.local")
+        self.assertEqual(result["ForestMode"], "10")
+        self.assertEqual(result["SchemaMaster"], "DC-01.example.local")
+        self.assertEqual(result["DomainNamingMaster"], "DC-01.example.local")
+
+        # Multi-valued wrappers land as lists under the parent name,
+        # NOT under "string".
+        self.assertNotIn("string", result)
+        self.assertEqual(
+            result["ApplicationPartitions"],
+            [
+                "DC=DomainDnsZones,DC=example,DC=local",
+                "DC=DomainDnsZones,DC=sub,DC=example,DC=local",
+                "DC=ForestDnsZones,DC=example,DC=local",
+            ],
+        )
+        self.assertEqual(result["Domains"], ["example.local", "sub.example.local"])
+        self.assertEqual(result["GlobalCatalogs"], ["DC-01.example.local", "DC-02.sub.example.local"])
+        self.assertEqual(result["Sites"], ["Default-First-Site-Name"])
+
+        # Empty wrappers normalize to [] so JSON consumers can loop without
+        # a per-field null check.
+        self.assertEqual(result["UpnSuffixes"], [])
+        self.assertEqual(result["SpnSuffixes"], [])
+        self.assertEqual(result["CrossForestReferences"], [])
+
+    def test_get_ad_forest_normalizes_nil_array_to_empty_list(self):
+        """A known array field with i:nil="true" collapses to [], not None."""
+        client = _build_cap_client("TopologyManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADForestResponse>'
+            '<ca:GetADForestResult>'
+            '<ca:Name>example.local</ca:Name>'
+            '<ca:Sites xmlns:i="http://www.w3.org/2001/XMLSchema-instance" i:nil="true"/>'
+            '</ca:GetADForestResult>'
+            '</ca:GetADForestResponse>'
+        )
+        result = client.get_ad_forest()
+        self.assertEqual(result["Sites"], [])
+        self.assertEqual(result["Name"], "example.local")
+
     def test_translate_name_sends_right_template_and_parses_reply(self):
         client = _build_cap_client("AccountManagement")
         client._nmf.recv.return_value = _wrap_envelope(

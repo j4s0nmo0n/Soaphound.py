@@ -1,4 +1,4 @@
-import logging, sys, os, getpass, json, dns.resolver, datetime, time, zipfile, base64, socket
+import logging, sys, os, getpass, json, re, dns.resolver, datetime, time, zipfile, base64, socket
 from soaphound.lib.cli import gen_cli_args
 from impacket.ldap.ldaptypes import LDAP_SID
 from soaphound.ad.adws import ADWSConnect, NTLMAuth, KerberosAuth
@@ -100,6 +100,49 @@ def _format_duration(seconds: float) -> str:
         return f"{minutes}m {secs}s"
     hours, minutes = divmod(minutes, 60)
     return f"{hours}h {minutes}m {secs}s"
+
+
+_FOREST_LABEL_COL = 29
+
+
+def _camel_to_label(name: str) -> str:
+    """Split a PascalCase/CamelCase identifier into space-separated title
+    words, matching SOAPy's rendering: ``SPNSuffixes`` -> ``Spn Suffixes``,
+    ``ApplicationPartitions`` -> ``Application Partitions``.
+    """
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", name)
+    s = re.sub(r"([a-z\d])([A-Z])", r"\1 \2", s)
+    return s.title()
+
+
+def _format_forest_soapy_style(result: dict) -> str:
+    """Render a ``get_ad_forest`` result as SOAPy's human-readable table:
+    label column padded to a fixed width, multi-valued fields printed with
+    one value per line (subsequent lines indented to the value column),
+    empty collections / nil scalars rendered as ``None``. Fields are shown
+    in alphabetical order of their display label, which is what SOAPy does.
+    """
+    if "error" in result:
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    items = sorted(result.items(), key=lambda kv: _camel_to_label(kv[0]))
+    lines: list[str] = []
+    pad = " " * _FOREST_LABEL_COL
+    for key, value in items:
+        label = _camel_to_label(key) + ":"
+        head = f"{label:<{_FOREST_LABEL_COL}}"
+        if isinstance(value, list):
+            if not value:
+                lines.append(f"{head}None")
+            else:
+                lines.append(f"{head}{value[0]}")
+                for extra in value[1:]:
+                    lines.append(f"{pad}{extra}")
+        elif value is None or value == "":
+            lines.append(f"{head}None")
+        else:
+            lines.append(f"{head}{value}")
+    return "\n".join(lines)
 
 
 def main():
@@ -229,11 +272,13 @@ def main():
                     dc_fqdn, options.domain, options.username, auth,
                 )
                 result = tm_client.get_ad_forest()
+                print(_format_forest_soapy_style(result))
             elif getattr(options, "adcap_translate", None):
                 am_client = ADWSConnect.account_cap_client(
                     dc_fqdn, options.domain, options.username, auth,
                 )
                 result = am_client.translate_name(options.adcap_translate)
+                print(json.dumps(result, indent=2, ensure_ascii=False))
             else:
                 # Default DN for forest-level optional features (e.g. Recycle Bin):
                 # CN=Partitions,CN=Configuration,<rootDN>. Overridable via
@@ -247,7 +292,7 @@ def main():
                     dc_fqdn, options.domain, options.username, auth,
                 )
                 result = tm_client.change_optional_feature(dn, options.adcap_change_feature, enable=True)
-            print(json.dumps(result, indent=2, ensure_ascii=False))
+                print(json.dumps(result, indent=2, ensure_ascii=False))
             success = True
             return
 

@@ -42,6 +42,83 @@ _AD_NAME_FORMAT_NAMES: dict[int, str] = {
 }
 
 
+# Multi-valued fields in the MS-ADCAP ``GetADForest`` response. The server
+# wraps their items in <ser:string> children, and empty collections may come
+# back either as an empty wrapper (``<Sites/>``) or as ``xsi:nil="true"``.
+# Both must normalise to ``[]`` so JSON consumers can iterate without a
+# per-field null check. Both PascalCase variants are listed because the
+# live server uses ``UPNSuffixes``/``SPNSuffixes`` while some docs/tests
+# use ``UpnSuffixes``/``SpnSuffixes``.
+_FOREST_ARRAY_FIELDS: frozenset = frozenset({
+    "ApplicationPartitions",
+    "CrossForestReferences",
+    "Domains",
+    "GlobalCatalogs",
+    "Sites",
+    "UPNSuffixes", "UpnSuffixes",
+    "SPNSuffixes", "SpnSuffixes",
+})
+
+
+def _localname_from_tag(tag: str) -> str:
+    return tag.split("}", 1)[-1] if "}" in tag else tag
+
+
+def _parse_ad_forest_payload(payload) -> dict:
+    """Parse a GetADForest response payload into a structured dict.
+
+    Match children by local name only, ignoring namespaces, because the
+    server mixes several namespace prefixes in the response (CustomActions
+    for the field names, Serialization/Arrays for ``<string>`` items,
+    XMLSchema-instance for ``nil``). This mirrors SOAPy's regex-based
+    approach (SOAPy ``src/adcap.py`` ``get_ad_forest``).
+    """
+    def _localname(elem):
+        return _localname_from_tag(elem.tag)
+
+    def _is_nil(elem):
+        for k, v in elem.attrib.items():
+            if _localname_from_tag(k) == "nil" and v == "true":
+                return True
+        return False
+
+    # The live server wraps the fields in <Forest> inside <GetADForestResponse>;
+    # the WSDL/legacy contract wraps them in <GetADForestResult> instead.
+    # Descend into whichever is present, else iterate the payload's own
+    # children (keeps the function robust if the wrapper ever disappears
+    # or the caller already stripped it).
+    forest = None
+    for descendant in payload.iter():
+        if _localname(descendant) in ("Forest", "GetADForestResult"):
+            forest = descendant
+            break
+    if forest is None:
+        forest = payload
+
+    out: dict = {}
+    for child in forest:
+        tag = _localname(child)
+
+        if _is_nil(child):
+            out[tag] = [] if tag in _FOREST_ARRAY_FIELDS else None
+            continue
+
+        # Any descendant named "string" (any namespace) is a list element.
+        string_children = [sub for sub in child.iter() if _localname(sub) == "string"]
+        if string_children:
+            out[tag] = [sub.text for sub in string_children if sub.text]
+            continue
+
+        if tag in _FOREST_ARRAY_FIELDS:
+            out[tag] = []
+            continue
+
+        text = (child.text or "").strip() if child.text else ""
+        out[tag] = text if text else None
+
+    return out
+
+
 def _ad_name_format_name(value: "int | str") -> str:
     """Convert a MS-ADCAP ``ActiveDirectoryNameFormat`` value to the
     PascalCase enum member name expected by the ADWS AccountManagement
@@ -904,14 +981,8 @@ class ADWSConnect:
         if payload is None:
             payload = result.find(f".//{{{ca_ns}}}GetADForestResult")
         if payload is None:
-            # Fallback: flatten every leaf we find under the body.
             payload = result
-        flat: dict = {}
-        for leaf in payload.iter():
-            tag = leaf.tag.split("}", 1)[-1] if "}" in leaf.tag else leaf.tag
-            if leaf.text and leaf.text.strip():
-                flat[tag] = leaf.text.strip()
-        return flat
+        return _parse_ad_forest_payload(payload)
 
     def translate_name(self, name: str, format_offered: int = 1, format_desired: int = 2) -> dict:
         """Call MS-ADCAP ``TranslateName``.
