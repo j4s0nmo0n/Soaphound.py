@@ -180,6 +180,19 @@ class ADWSError(Exception):
      """Base exception for ADWS errors"""
      pass
 
+class ADWSInvalidPropertyError(ADWSError):
+    """Exception raised when a requested attribute is not a valid AD attribute.
+
+    AD returns InvalidPropertyValueDetail when a selection/sort property does
+    not exist in the target schema. This commonly happens for LAPS attributes
+    (ms-Mcs-AdmPwd, msLAPS-*) that are present in the embedded/fallback schema
+    GUID map but not actually installed in the target domain.
+    """
+    def __init__(self, invalid_property: str, message: str = ""):
+        self.invalid_property = invalid_property
+        super().__init__(f"Invalid AD property '{invalid_property}': {message}")
+
+
 class ADWSReferralError(ADWSError):
     """Exception raised when AD returns a referral"""
     def __init__(self, referral_url: str, message: str = ""):
@@ -523,7 +536,21 @@ class ADWSConnect:
                     raise  # Re-raise referral errors
                 except Exception as e:
                     logging.debug(f"Error parsing fault detail for referral: {e}")
-            
+
+                # Check if this is an invalid selection/sort property
+                try:
+                    short_error = detail_node.findtext(".//{http://schemas.microsoft.com/2008/1/ActiveDirectory}ShortError")
+                    invalid_property = detail_node.findtext(".//{http://schemas.microsoft.com/2008/1/ActiveDirectory}InvalidProperty")
+                    if invalid_property or (short_error and "InvalidProperty" in short_error):
+                        # Strip the ADWS 'addata:' namespace prefix if present
+                        prop = (invalid_property or "").split(":", 1)[-1].strip()
+                        logging.warning(f"AD reports invalid property: {invalid_property}")
+                        raise ADWSInvalidPropertyError(prop, reason)
+                except ADWSInvalidPropertyError:
+                    raise  # Re-raise invalid property errors
+                except Exception as e:
+                    logging.debug(f"Error parsing fault detail for invalid property: {e}")
+
             # For other faults, raise standard error
             detail_text = ElementTree.tostring(detail_node, encoding='unicode').strip() if detail_node is not None else "No detail"
             logging.error(f"SOAP Fault received: {reason}")
