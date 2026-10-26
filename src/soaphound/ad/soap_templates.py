@@ -245,6 +245,96 @@ TM_GET_AD_DOMAIN_CONTROLLER_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3
     </s:Body>
 </s:Envelope>"""
 
+# AM_GET_AD_GROUP_MEMBER — lists direct members of a group.
+#
+# Body elements MUST be in strict alphabetical order (gotcha: WCF
+# DataContract serialisation silently drops out-of-order children; the
+# server then reports the parameter as missing). Order here is
+# ``FormatOffered`` < ``GroupDN`` < ``PartitionDN``.
+#
+# PartitionDN is MANDATORY despite the WSDL marking it optional (empirical:
+# server returns an ArgumentError ``MustSupplyPartitionDn`` otherwise).
+# Supply the NC the server searches, e.g. ``DC=example,DC=local``.
+#
+# The identity parameter is NOT called ``<Identity>`` on this primitive:
+# it is ``<GroupDN>``. The two Principal* primitives use ``<PrincipalDN>``
+# instead. An ``<Identity>`` element here is silently dropped.
+AM_GET_AD_GROUP_MEMBER_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+    xmlns:a="http://www.w3.org/2005/08/addressing"
+    xmlns:ca="http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions">
+    <s:Header>
+        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions/AccountManagement/GetADGroupMember</a:Action>
+        <ca:Server>ldap:389</ca:Server>
+        <a:MessageID>urn:uuid:{uuid}</a:MessageID>
+        <a:ReplyTo>
+            <a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
+        </a:ReplyTo>
+        <a:To s:mustUnderstand="1">net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/AccountManagement</a:To>
+    </s:Header>
+    <s:Body>
+        <ca:GetADGroupMemberRequest>
+            <ca:FormatOffered>{format_offered}</ca:FormatOffered>
+            <ca:GroupDN>{identity}</ca:GroupDN>
+            <ca:PartitionDN>{partition_dn}</ca:PartitionDN>
+        </ca:GetADGroupMemberRequest>
+    </s:Body>
+</s:Envelope>"""
+
+# AM_GET_AD_PRINCIPAL_GROUP_MEMBERSHIP — direct groups of a principal
+# (equivalent to reading its ``memberOf`` attribute; no nested resolution).
+# Alphabetical order flips: ``FormatOffered`` < ``PartitionDN`` <
+# ``PrincipalDN`` (``Pa`` < ``Pr``). Identity field is ``<PrincipalDN>``.
+AM_GET_AD_PRINCIPAL_GROUP_MEMBERSHIP_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+    xmlns:a="http://www.w3.org/2005/08/addressing"
+    xmlns:ca="http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions">
+    <s:Header>
+        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions/AccountManagement/GetADPrincipalGroupMembership</a:Action>
+        <ca:Server>ldap:389</ca:Server>
+        <a:MessageID>urn:uuid:{uuid}</a:MessageID>
+        <a:ReplyTo>
+            <a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
+        </a:ReplyTo>
+        <a:To s:mustUnderstand="1">net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/AccountManagement</a:To>
+    </s:Header>
+    <s:Body>
+        <ca:GetADPrincipalGroupMembershipRequest>
+            <ca:FormatOffered>{format_offered}</ca:FormatOffered>
+            <ca:PartitionDN>{partition_dn}</ca:PartitionDN>
+            <ca:PrincipalDN>{identity}</ca:PrincipalDN>
+        </ca:GetADPrincipalGroupMembershipRequest>
+    </s:Body>
+</s:Envelope>"""
+
+# AM_GET_AD_PRINCIPAL_AUTHORIZATION_GROUP — TRANSITIVE groups of a
+# principal (nested resolved server-side). Same body shape as
+# GetADPrincipalGroupMembership (same alphabetical order). The lookup
+# runs under the caller's security context, so a low-privilege session
+# cannot query a privileged principal: expect
+# ``ESecurityPrincipalOperation`` / Win32 error 5 (ACCESS_DENIED) in
+# that case. The response wrapper name is spec'd as
+# ``<AuthorizationGroups>`` but Windows Server 2025 (build 26100)
+# actually ships ``<MemberOf>``; the parser accepts both.
+AM_GET_AD_PRINCIPAL_AUTHORIZATION_GROUP_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+    xmlns:a="http://www.w3.org/2005/08/addressing"
+    xmlns:ca="http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions">
+    <s:Header>
+        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/2008/1/ActiveDirectory/CustomActions/AccountManagement/GetADPrincipalAuthorizationGroup</a:Action>
+        <ca:Server>ldap:389</ca:Server>
+        <a:MessageID>urn:uuid:{uuid}</a:MessageID>
+        <a:ReplyTo>
+            <a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
+        </a:ReplyTo>
+        <a:To s:mustUnderstand="1">net.tcp://{fqdn}:9389/ActiveDirectoryWebServices/Windows/AccountManagement</a:To>
+    </s:Header>
+    <s:Body>
+        <ca:GetADPrincipalAuthorizationGroupRequest>
+            <ca:FormatOffered>{format_offered}</ca:FormatOffered>
+            <ca:PartitionDN>{partition_dn}</ca:PartitionDN>
+            <ca:PrincipalDN>{identity}</ca:PrincipalDN>
+        </ca:GetADPrincipalAuthorizationGroupRequest>
+    </s:Body>
+</s:Envelope>"""
+
 
 LDAP_PUT_FSTRING: str = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
         xmlns:a="http://www.w3.org/2005/08/addressing"

@@ -162,6 +162,37 @@ def _format_adcap_dict_soapy_style(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_principal_list_powershell(principals: list[dict]) -> str:
+    """Render a list of principal dicts as a PowerShell Format-List output,
+    matching what RSAT's Get-AD* cmdlets print natively.
+
+    Each principal is a block of ``Key : Value`` lines, colon-aligned to the
+    longest key + 1 space. Lists render as ``{a, b, c}`` (``{}`` when empty).
+    ``None`` renders as an empty string on the right of the colon. Blocks are
+    separated by one blank line.
+    """
+    if not principals:
+        return ""
+
+    out_blocks: list[str] = []
+    for principal in principals:
+        if not principal:
+            continue
+        col = max(len(k) for k in principal.keys())
+        block_lines: list[str] = []
+        for key, value in sorted(principal.items()):
+            if isinstance(value, list):
+                rendered = "{" + ", ".join(str(v) for v in value) + "}" if value else "{}"
+            elif value is None:
+                rendered = ""
+            else:
+                rendered = str(value)
+            block_lines.append(f"{key:<{col}} : {rendered}")
+        out_blocks.append("\n".join(block_lines))
+
+    return "\n\n".join(out_blocks)
+
+
 def main():
     options = gen_cli_args()
     start = time.monotonic()
@@ -283,7 +314,10 @@ def main():
                 or getattr(options, "adcap_change_feature", None) \
                 or getattr(options, "adcap_get_domain", False) \
                 or getattr(options, "adcap_get_dc", False) \
-                or getattr(options, "adcap_get_version", False):
+                or getattr(options, "adcap_get_version", False) \
+                or getattr(options, "adcap_get_group_member", None) \
+                or getattr(options, "adcap_get_group_membership", None) \
+                or getattr(options, "adcap_get_auth_groups", None):
             # <ca:Server> header rejects an IP literal with 'Instance invalid';
             # resolve to an FQDN before opening any CustomActions client.
             dc_fqdn = _resolve_dc_fqdn(options.domain_controller)
@@ -336,6 +370,38 @@ def main():
                 )
                 result = am_client.translate_name(options.adcap_translate)
                 print(json.dumps(result, indent=2, ensure_ascii=False))
+            elif (
+                getattr(options, "adcap_get_group_member", None)
+                or getattr(options, "adcap_get_group_membership", None)
+                or getattr(options, "adcap_get_auth_groups", None)
+            ):
+                identity = (
+                    getattr(options, "adcap_get_group_member", None)
+                    or getattr(options, "adcap_get_group_membership", None)
+                    or getattr(options, "adcap_get_auth_groups", None)
+                )
+                principal_format = getattr(options, "adcap_principal_format", "dn")
+                format_offered = 1 if principal_format == "dn" else 2
+                partition_dn = getattr(options, "adcap_partition_dn", None)
+                am_client = ADWSConnect.account_cap_client(
+                    dc_fqdn, options.domain, options.username, auth,
+                )
+                if getattr(options, "adcap_get_group_member", None):
+                    result = am_client.get_ad_group_member(
+                        identity, partition_dn=partition_dn, format_offered=format_offered,
+                    )
+                elif getattr(options, "adcap_get_group_membership", None):
+                    result = am_client.get_ad_principal_group_membership(
+                        identity, partition_dn=partition_dn, format_offered=format_offered,
+                    )
+                else:
+                    result = am_client.get_ad_principal_authorization_group(
+                        identity, partition_dn=partition_dn, format_offered=format_offered,
+                    )
+                if isinstance(result, dict) and "error" in result:
+                    print(json.dumps(result, indent=2, ensure_ascii=False))
+                else:
+                    print(_format_principal_list_powershell(result))
             else:
                 # Default DN for forest-level optional features (e.g. Recycle Bin):
                 # CN=Partitions,CN=Configuration,<rootDN>. Overridable via

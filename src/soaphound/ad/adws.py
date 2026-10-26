@@ -32,6 +32,9 @@ from .soap_templates import (
     TM_GET_VERSION_FSTRING,
     TM_GET_AD_DOMAIN_FSTRING,
     TM_GET_AD_DOMAIN_CONTROLLER_FSTRING,
+    AM_GET_AD_GROUP_MEMBER_FSTRING,
+    AM_GET_AD_PRINCIPAL_GROUP_MEMBERSHIP_FSTRING,
+    AM_GET_AD_PRINCIPAL_AUTHORIZATION_GROUP_FSTRING,
 )
 
 # MS-ADCAP ActiveDirectoryNameFormat enum (per [MS-ADCAP] Appendix A). Only
@@ -199,6 +202,105 @@ def _parse_dc_payload(payload) -> dict:
         out[tag] = text if text else None
 
     return out
+
+
+# Wrapper element names used by the AccountManagement group-membership
+# primitives to hold the returned list. Order observed in lab (Windows
+# Server 2025 build 26100):
+#   GetADGroupMember                        -> <Members>
+#   GetADPrincipalGroupMembership           -> <MemberOf>
+#   GetADPrincipalAuthorizationGroup        -> <MemberOf>  (spec says
+#                                              <AuthorizationGroups>)
+# The parser matches on local name so a server following the spec stays
+# supported too.
+_PRINCIPAL_LIST_WRAPPERS: tuple = (
+    "MemberOf", "AuthorizationGroups", "Members", "Groups",
+)
+
+
+def partition_dn_from_identity(identity: str | None) -> str | None:
+    """Derive the naming-context DN from a DN-form identity.
+
+    ``CN=Domain Admins,CN=Users,DC=jjk,DC=local`` → ``DC=jjk,DC=local``.
+    Returns ``None`` when the identity has no trailing ``DC=`` components
+    (CanonicalName or malformed DN) — the caller must then supply the
+    PartitionDN explicitly.
+    """
+    import re as _re
+    if not identity:
+        return None
+    m = _re.search(
+        r"(DC=[^,]+(?:,\s*DC=[^,]+)*)\s*$", identity, _re.IGNORECASE,
+    )
+    return m.group(1).replace(" ", "") if m else None
+
+
+def _parse_ad_principal(elem) -> dict:
+    """Parse one ``<ActiveDirectoryPrincipal>`` (members) or
+    ``<ActiveDirectoryGroup>`` (groups) element into a flat dict.
+
+    PascalCase keys (wire-level names) to match the convention of the
+    other Soaphound.py ADCAP parsers; the rendering layer converts to
+    display labels at print time.
+
+    Per-field semantics:
+      - ``SID`` (base64) → canonical ``S-1-…`` via ``_decode_binary_sid_b64``;
+        a nil ``<SID>`` surfaces as ``None``.
+      - ``ObjectTypes`` wrapping ``<string>`` children → list[str]; a nil
+        or empty wrapper collapses to ``[]``.
+      - Any other child with ``nil="true"`` surfaces as explicit ``None``
+        in the dict (schema-stable JSON output), not an omitted key. This
+        matters for well-known SIDs (Everyone, Authenticated Users) which
+        come with ``DistinguishedName`` / ``ObjectClass`` nil.
+      - Scalars → text (stripped), or ``None`` when empty.
+    """
+    def _lname(e):
+        return _localname_from_tag(e.tag)
+
+    out: dict = {}
+    for child in elem:
+        tag = _lname(child)
+        if tag == "SID":
+            if _is_nil(child):
+                out["SID"] = None
+                continue
+            sid_b64 = (child.text or "").strip() if child.text else ""
+            out["SID"] = _decode_binary_sid_b64(sid_b64) if sid_b64 else None
+            continue
+        if tag == "ObjectTypes":
+            if _is_nil(child):
+                out["ObjectTypes"] = []
+                continue
+            out["ObjectTypes"] = [
+                sub.text for sub in child.iter()
+                if _lname(sub) == "string" and sub.text
+            ]
+            continue
+        if _is_nil(child):
+            out[tag] = None
+            continue
+        text = (child.text or "").strip() if child.text else ""
+        out[tag] = text if text else None
+    return out
+
+
+def _parse_principal_list(payload, wrappers: tuple = _PRINCIPAL_LIST_WRAPPERS) -> list[dict]:
+    """Return the list of principals/groups under the first matching
+    wrapper (by local name) in ``payload``. Returns ``[]`` when no
+    wrapper is present or the wrapper has no children — distinct from a
+    SOAP fault (callers short-circuit on ``_tm_fault_or_tree`` error dicts).
+    """
+    def _lname(e):
+        return _localname_from_tag(e.tag)
+
+    wrapper = None
+    for descendant in payload.iter():
+        if _lname(descendant) in wrappers:
+            wrapper = descendant
+            break
+    if wrapper is None:
+        return []
+    return [_parse_ad_principal(child) for child in wrapper]
 
 
 def _decode_binary_sid_b64(value: str) -> str:
@@ -1230,6 +1332,127 @@ class ADWSConnect:
         translated = [elem.text for elem in result.iter() if elem.text and (
             elem.tag.split("}", 1)[-1] if "}" in elem.tag else elem.tag) == "string"]
         return {"input": name, "format_offered": format_offered, "format_desired": format_desired, "translated": translated}
+
+    def _am_require_endpoint(self, primitive: str) -> None:
+        if self._resource != "AccountManagement":
+            raise NotImplementedError(
+                f"{primitive} requires an 'AccountManagement' client "
+                f"(use ADWSConnect.account_cap_client)"
+            )
+
+    def get_ad_group_member(
+        self, identity: str, partition_dn: str | None = None,
+        format_offered: int = 1,
+    ) -> list[dict]:
+        """Call MS-ADCAP ``GetADGroupMember`` — list direct members of a
+        group.
+
+        ``partition_dn`` names the NC the server searches (e.g.
+        ``DC=example,DC=local``). It is MANDATORY server-side despite the
+        WSDL marking it optional (``MustSupplyPartitionDn`` otherwise).
+        When None, it is auto-derived from the trailing ``DC=`` components
+        of ``identity``; the caller MUST supply it explicitly for a
+        canonical-name identity. The identity SOAP element on this
+        primitive is ``<GroupDN>`` (not the generic ``<Identity>``, which
+        is silently dropped).
+
+        Args:
+            identity: group DN (default) or canonical name.
+            partition_dn: NC DN; auto-derived when None if ``identity``
+                is a DN.
+            format_offered: 1 = DistinguishedName (default), 2 = CanonicalName.
+
+        Returns:
+            List of dicts (one per direct member) with PascalCase keys
+            matching the wire (``DistinguishedName``, ``Name``,
+            ``ObjectClass``, ``ObjectGuid``, ``ObjectTypes`` (list),
+            ``ReferenceServer``, ``SID`` (canonical form),
+            ``SamAccountName``), or ``{"error": ..., "detail": ...}`` on
+            SOAP Fault.
+        """
+        self._am_require_endpoint("get_ad_group_member")
+        resolved_partition = partition_dn or partition_dn_from_identity(identity)
+        if not resolved_partition:
+            raise ValueError(
+                "partition_dn is required (server rejects an empty PartitionDN "
+                "with MustSupplyPartitionDn). It could not be auto-derived "
+                f"from identity {identity!r} — supply partition_dn explicitly."
+            )
+        soap = AM_GET_AD_GROUP_MEMBER_FSTRING.format(
+            uuid=str(uuid4()), fqdn=self._fqdn,
+            format_offered=_ad_name_format_name(format_offered),
+            identity=identity, partition_dn=resolved_partition,
+        )
+        result = self._tm_fault_or_tree(soap)
+        if isinstance(result, dict):
+            return result
+        return _parse_principal_list(result)
+
+    def get_ad_principal_group_membership(
+        self, identity: str, partition_dn: str | None = None,
+        format_offered: int = 1,
+    ) -> list[dict]:
+        """Call MS-ADCAP ``GetADPrincipalGroupMembership`` — direct groups
+        a principal belongs to (equivalent to reading its ``memberOf``;
+        no nested resolution). Identity SOAP element is ``<PrincipalDN>``.
+
+        Returns the same shape as ``get_ad_group_member`` with the extra
+        group-only fields ``GroupScope`` and ``GroupType`` on each entry.
+        """
+        self._am_require_endpoint("get_ad_principal_group_membership")
+        resolved_partition = partition_dn or partition_dn_from_identity(identity)
+        if not resolved_partition:
+            raise ValueError(
+                "partition_dn is required (server rejects an empty PartitionDN "
+                "with MustSupplyPartitionDn). It could not be auto-derived "
+                f"from identity {identity!r} — supply partition_dn explicitly."
+            )
+        soap = AM_GET_AD_PRINCIPAL_GROUP_MEMBERSHIP_FSTRING.format(
+            uuid=str(uuid4()), fqdn=self._fqdn,
+            format_offered=_ad_name_format_name(format_offered),
+            identity=identity, partition_dn=resolved_partition,
+        )
+        result = self._tm_fault_or_tree(soap)
+        if isinstance(result, dict):
+            return result
+        return _parse_principal_list(result)
+
+    def get_ad_principal_authorization_group(
+        self, identity: str, partition_dn: str | None = None,
+        format_offered: int = 1,
+    ) -> list[dict]:
+        """Call MS-ADCAP ``GetADPrincipalAuthorizationGroup`` — the
+        TRANSITIVE groups of a principal (nested groups resolved
+        server-side). This is the interesting primitive: no recursive
+        LDAP walk required client-side.
+
+        Caveat: the server runs the lookup under the caller's security
+        context, so querying a privileged principal (e.g. Administrator)
+        from a low-privilege session returns ``ESecurityPrincipalOperation``
+        / Win32 error 5 (ACCESS_DENIED). Query a principal the caller has
+        rights over (typically themselves) or use a privileged caller.
+
+        Response wrapper is spec'd as ``<AuthorizationGroups>`` but
+        Windows Server 2025 (build 26100) actually emits ``<MemberOf>``;
+        both are accepted by the parser.
+        """
+        self._am_require_endpoint("get_ad_principal_authorization_group")
+        resolved_partition = partition_dn or partition_dn_from_identity(identity)
+        if not resolved_partition:
+            raise ValueError(
+                "partition_dn is required (server rejects an empty PartitionDN "
+                "with MustSupplyPartitionDn). It could not be auto-derived "
+                f"from identity {identity!r} — supply partition_dn explicitly."
+            )
+        soap = AM_GET_AD_PRINCIPAL_AUTHORIZATION_GROUP_FSTRING.format(
+            uuid=str(uuid4()), fqdn=self._fqdn,
+            format_offered=_ad_name_format_name(format_offered),
+            identity=identity, partition_dn=resolved_partition,
+        )
+        result = self._tm_fault_or_tree(soap)
+        if isinstance(result, dict):
+            return result
+        return _parse_principal_list(result)
 
     def change_optional_feature(self, distinguished_name: str, feature_guid: str, enable: bool = True) -> dict:
         """Call MS-ADCAP ``ChangeOptionalFeature``.

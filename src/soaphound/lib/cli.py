@@ -180,6 +180,27 @@ def gen_cli_args():
         action="store_true",
         help="Call MS-ADCAP GetVersion (ADWS service fingerprint).",
     )
+    adcap_mex.add_argument(
+        "--adcap-get-group-member",
+        metavar="GROUP",
+        action="store",
+        default=None,
+        help="Call MS-ADCAP AccountManagement/GetADGroupMember — list direct members of GROUP (DN by default, see --adcap-principal-format).",
+    )
+    adcap_mex.add_argument(
+        "--adcap-get-group-membership",
+        metavar="PRINCIPAL",
+        action="store",
+        default=None,
+        help="Call MS-ADCAP AccountManagement/GetADPrincipalGroupMembership — direct groups of PRINCIPAL.",
+    )
+    adcap_mex.add_argument(
+        "--adcap-get-auth-groups",
+        metavar="PRINCIPAL",
+        action="store",
+        default=None,
+        help="Call MS-ADCAP AccountManagement/GetADPrincipalAuthorizationGroup — transitive groups of PRINCIPAL (nested resolved server-side; needs rights on PRINCIPAL).",
+    )
     adcap_group.add_argument(
         "--adcap-change-feature-dn",
         metavar="DN",
@@ -200,6 +221,19 @@ def gen_cli_args():
         action="append",
         default=[],
         help="NTDS Settings DN for --adcap-get-dc (repeatable, required). Example: CN=NTDS Settings,CN=DC-01,CN=Servers,CN=Default-First-Site-Name,CN=Sites,CN=Configuration,DC=example,DC=local",
+    )
+    adcap_group.add_argument(
+        "--adcap-principal-format",
+        choices=["dn", "canonical"],
+        default="dn",
+        help="Format of the principal/group identity for --adcap-get-group-member / --adcap-get-group-membership / --adcap-get-auth-groups (default: dn, maps to MS-ADCAP DistinguishedName=1).",
+    )
+    adcap_group.add_argument(
+        "--adcap-partition-dn",
+        metavar="DN",
+        action="store",
+        default=None,
+        help="Override the PartitionDN sent to the AccountManagement group primitives. Auto-derived from the identity's trailing DC= components when --adcap-principal-format=dn; required when canonical.",
     )
 
     if len(sys.argv) == 1:

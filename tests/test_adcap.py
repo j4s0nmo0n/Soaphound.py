@@ -13,8 +13,13 @@ The three operations split over two endpoints:
 import unittest
 from unittest.mock import MagicMock
 
-from soaphound.ad.adws import ADWSConnect, _ad_name_format_name
+from soaphound.ad.adws import (
+    ADWSConnect, _ad_name_format_name,
+    _parse_ad_principal, _parse_principal_list,
+    partition_dn_from_identity,
+)
 from soaphound.ad.soap_templates import NAMESPACES
+from soaphound.soaphound import _format_principal_list_powershell
 
 
 _CA_NS = NAMESPACES["ca"]
@@ -549,6 +554,390 @@ class DecodeBinarySidTests(unittest.TestCase):
     def test_passes_through_empty_string(self):
         from soaphound.ad.adws import _decode_binary_sid_b64
         self.assertEqual(_decode_binary_sid_b64(""), "")
+
+
+def _sid_b64(canonical: str) -> str:
+    """Encode a canonical SID string the way the server ships it on the
+    wire (xs:base64Binary of the raw LDAP_SID bytes)."""
+    from base64 import b64encode
+    from impacket.ldap.ldaptypes import LDAP_SID
+    s = LDAP_SID()
+    s.fromCanonical(canonical)
+    return b64encode(s.getData()).decode()
+
+
+class PartitionDnFromIdentityTests(unittest.TestCase):
+    """Trailing DC= derivation used to auto-fill PartitionDN (which the
+    server requires despite the WSDL marking it optional)."""
+
+    def test_derives_from_user_dn(self):
+        self.assertEqual(
+            partition_dn_from_identity(
+                "CN=alice,CN=Users,DC=example,DC=local"
+            ),
+            "DC=example,DC=local",
+        )
+
+    def test_derives_from_group_dn_with_space(self):
+        self.assertEqual(
+            partition_dn_from_identity(
+                "CN=Domain Admins,CN=Users,DC=example,DC=local"
+            ),
+            "DC=example,DC=local",
+        )
+
+    def test_handles_three_level_dc(self):
+        self.assertEqual(
+            partition_dn_from_identity(
+                "CN=foo,OU=sub,DC=sub,DC=example,DC=com"
+            ),
+            "DC=sub,DC=example,DC=com",
+        )
+
+    def test_returns_none_for_canonical_name(self):
+        self.assertIsNone(
+            partition_dn_from_identity("example.local/Users/alice")
+        )
+
+    def test_returns_none_for_empty_input(self):
+        self.assertIsNone(partition_dn_from_identity(""))
+        self.assertIsNone(partition_dn_from_identity(None))
+
+
+class GetADGroupMemberTests(unittest.TestCase):
+    """GetADGroupMember — AccountManagement endpoint required; identity
+    field is <GroupDN>; body alphabetical FormatOffered < GroupDN <
+    PartitionDN; parses <Members><ActiveDirectoryPrincipal> entries."""
+
+    def test_requires_account_management_endpoint(self):
+        tm = _build_cap_client("TopologyManagement")
+        with self.assertRaises(NotImplementedError):
+            tm.get_ad_group_member(
+                "CN=g,CN=Users,DC=example,DC=local",
+                partition_dn="DC=example,DC=local",
+            )
+
+    def test_rejects_empty_partition_dn_when_not_derivable(self):
+        am = _build_cap_client("AccountManagement")
+        with self.assertRaises(ValueError):
+            am.get_ad_group_member("not-a-dn")
+
+    def test_body_contains_group_dn_and_partition_dn_in_alphabetical_order(self):
+        client = _build_cap_client("AccountManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADGroupMemberResponse><ca:Members/></ca:GetADGroupMemberResponse>'
+        )
+        client.get_ad_group_member(
+            "CN=Admins,CN=Users,DC=example,DC=local",
+            partition_dn="DC=example,DC=local",
+        )
+        sent = client._nmf.send.call_args[0][0]
+        self.assertIn(
+            "AccountManagement/GetADGroupMember</a:Action>", sent,
+        )
+        self.assertIn("<ca:FormatOffered>DistinguishedName</ca:FormatOffered>", sent)
+        self.assertIn(
+            "<ca:GroupDN>CN=Admins,CN=Users,DC=example,DC=local</ca:GroupDN>", sent,
+        )
+        self.assertIn("<ca:PartitionDN>DC=example,DC=local</ca:PartitionDN>", sent)
+        self.assertLess(sent.index("GroupDN"), sent.index("PartitionDN"))
+
+    def test_auto_derives_partition_dn_from_identity(self):
+        client = _build_cap_client("AccountManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADGroupMemberResponse><ca:Members/></ca:GetADGroupMemberResponse>'
+        )
+        client.get_ad_group_member(
+            "CN=Admins,CN=Users,DC=example,DC=local",
+        )
+        sent = client._nmf.send.call_args[0][0]
+        self.assertIn("<ca:PartitionDN>DC=example,DC=local</ca:PartitionDN>", sent)
+
+    def test_parses_members_with_decoded_sid(self):
+        client = _build_cap_client("AccountManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADGroupMemberResponse>'
+            '<ca:Members xmlns:i="http://www.w3.org/2001/XMLSchema-instance">'
+            '<ca:ActiveDirectoryPrincipal>'
+            '<ca:DistinguishedName>CN=alice,CN=Users,DC=example,DC=local</ca:DistinguishedName>'
+            '<ca:Name>alice</ca:Name>'
+            '<ca:ObjectClass>user</ca:ObjectClass>'
+            '<ca:ObjectGuid>e7d808c7-b439-40f7-b061-a09ddb843dab</ca:ObjectGuid>'
+            '<ca:ObjectTypes xmlns:b="http://schemas.microsoft.com/2003/10/Serialization/Arrays">'
+            '<b:string>top</b:string><b:string>person</b:string><b:string>user</b:string>'
+            '</ca:ObjectTypes>'
+            '<ca:ReferenceServer>example.local</ca:ReferenceServer>'
+            f'<ca:SID>{_sid_b64("S-1-5-21-1-2-3-500")}</ca:SID>'
+            '<ca:SamAccountName>alice</ca:SamAccountName>'
+            '</ca:ActiveDirectoryPrincipal>'
+            '</ca:Members></ca:GetADGroupMemberResponse>'
+        )
+        members = client.get_ad_group_member(
+            "CN=Admins,CN=Users,DC=example,DC=local",
+            partition_dn="DC=example,DC=local",
+        )
+        self.assertEqual(len(members), 1)
+        m = members[0]
+        self.assertEqual(m["Name"], "alice")
+        self.assertEqual(m["ObjectClass"], "user")
+        self.assertEqual(m["ObjectTypes"], ["top", "person", "user"])
+        self.assertEqual(m["SID"], "S-1-5-21-1-2-3-500")
+        self.assertEqual(m["ReferenceServer"], "example.local")
+        # ActiveDirectoryPrincipal does not carry GroupScope/GroupType.
+        self.assertNotIn("GroupScope", m)
+        self.assertNotIn("GroupType", m)
+
+    def test_empty_wrapper_returns_empty_list(self):
+        client = _build_cap_client("AccountManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADGroupMemberResponse><ca:Members/></ca:GetADGroupMemberResponse>'
+        )
+        self.assertEqual(
+            client.get_ad_group_member(
+                "CN=g,CN=Users,DC=example,DC=local",
+                partition_dn="DC=example,DC=local",
+            ),
+            [],
+        )
+
+    def test_fault_surfaces_as_error_dict(self):
+        client = _build_cap_client("AccountManagement")
+        client._nmf.recv.return_value = _fault_envelope()
+        result = client.get_ad_group_member(
+            "CN=g,CN=Users,DC=example,DC=local",
+            partition_dn="DC=example,DC=local",
+        )
+        self.assertIsInstance(result, dict)
+        self.assertIn("error", result)
+
+
+class GetADPrincipalGroupMembershipTests(unittest.TestCase):
+    """GetADPrincipalGroupMembership — identity field <PrincipalDN>;
+    alphabetical order flips to FormatOffered < PartitionDN <
+    PrincipalDN; response wrapper <MemberOf>, items
+    <ActiveDirectoryGroup> (with extra GroupScope/GroupType)."""
+
+    def test_body_sends_principal_dn_after_partition_dn(self):
+        client = _build_cap_client("AccountManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADPrincipalGroupMembershipResponse><ca:MemberOf/>'
+            '</ca:GetADPrincipalGroupMembershipResponse>'
+        )
+        client.get_ad_principal_group_membership(
+            "CN=alice,CN=Users,DC=example,DC=local",
+            partition_dn="DC=example,DC=local",
+        )
+        sent = client._nmf.send.call_args[0][0]
+        self.assertIn(
+            "AccountManagement/GetADPrincipalGroupMembership</a:Action>", sent,
+        )
+        self.assertIn(
+            "<ca:PrincipalDN>CN=alice,CN=Users,DC=example,DC=local</ca:PrincipalDN>",
+            sent,
+        )
+        self.assertLess(sent.index("PartitionDN"), sent.index("PrincipalDN"))
+
+    def test_parses_group_entries_with_scope_and_type(self):
+        client = _build_cap_client("AccountManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADPrincipalGroupMembershipResponse>'
+            '<ca:MemberOf xmlns:i="http://www.w3.org/2001/XMLSchema-instance">'
+            '<ca:ActiveDirectoryGroup>'
+            '<ca:DistinguishedName>CN=Domain Users,CN=Users,DC=example,DC=local</ca:DistinguishedName>'
+            '<ca:Name>Domain Users</ca:Name>'
+            '<ca:ObjectClass>group</ca:ObjectClass>'
+            '<ca:ObjectGuid>b527cac1-c989-4791-8893-40e956241978</ca:ObjectGuid>'
+            '<ca:ObjectTypes xmlns:b="http://schemas.microsoft.com/2003/10/Serialization/Arrays">'
+            '<b:string>top</b:string><b:string>group</b:string>'
+            '</ca:ObjectTypes>'
+            '<ca:ReferenceServer>example.local</ca:ReferenceServer>'
+            f'<ca:SID>{_sid_b64("S-1-5-21-1-2-3-513")}</ca:SID>'
+            '<ca:SamAccountName>Domain Users</ca:SamAccountName>'
+            '<ca:GroupScope>Global</ca:GroupScope>'
+            '<ca:GroupType>Security</ca:GroupType>'
+            '</ca:ActiveDirectoryGroup>'
+            '</ca:MemberOf></ca:GetADPrincipalGroupMembershipResponse>'
+        )
+        groups = client.get_ad_principal_group_membership(
+            "CN=alice,CN=Users,DC=example,DC=local",
+            partition_dn="DC=example,DC=local",
+        )
+        self.assertEqual(len(groups), 1)
+        g = groups[0]
+        self.assertEqual(g["Name"], "Domain Users")
+        self.assertEqual(g["GroupScope"], "Global")
+        self.assertEqual(g["GroupType"], "Security")
+        self.assertEqual(g["SID"], "S-1-5-21-1-2-3-513")
+
+
+class GetADPrincipalAuthorizationGroupTests(unittest.TestCase):
+    """GetADPrincipalAuthorizationGroup — same identity field and body
+    alphabetical order as GetADPrincipalGroupMembership. Spec names the
+    response wrapper <AuthorizationGroups>; Windows Server 2025 (build
+    26100) actually emits <MemberOf>; both are accepted. Also exercises
+    well-known SIDs (Everyone / Authenticated Users) which come with nil
+    DistinguishedName / ObjectClass — these must surface as explicit
+    None in the dict (schema-stable JSON)."""
+
+    def test_body_targets_authorization_group_action(self):
+        client = _build_cap_client("AccountManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADPrincipalAuthorizationGroupResponse>'
+            '<ca:MemberOf/></ca:GetADPrincipalAuthorizationGroupResponse>'
+        )
+        client.get_ad_principal_authorization_group(
+            "CN=alice,CN=Users,DC=example,DC=local",
+            partition_dn="DC=example,DC=local",
+        )
+        sent = client._nmf.send.call_args[0][0]
+        self.assertIn(
+            "AccountManagement/GetADPrincipalAuthorizationGroup</a:Action>", sent,
+        )
+
+    def test_parses_under_memberof_wrapper_with_well_known_sids(self):
+        client = _build_cap_client("AccountManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADPrincipalAuthorizationGroupResponse>'
+            '<ca:MemberOf xmlns:i="http://www.w3.org/2001/XMLSchema-instance">'
+            # Well-known SID: nil DN/ObjectClass; empty ObjectTypes; zero-GUID;
+            # SamAccountName populated with friendly name.
+            '<ca:ActiveDirectoryGroup>'
+            '<ca:DistinguishedName i:nil="true"/>'
+            '<ca:Name>Everyone</ca:Name>'
+            '<ca:ObjectClass i:nil="true"/>'
+            '<ca:ObjectGuid>00000000-0000-0000-0000-000000000000</ca:ObjectGuid>'
+            '<ca:ObjectTypes xmlns:b="http://schemas.microsoft.com/2003/10/Serialization/Arrays">'
+            '</ca:ObjectTypes>'
+            '<ca:ReferenceServer>example.local</ca:ReferenceServer>'
+            f'<ca:SID>{_sid_b64("S-1-1-0")}</ca:SID>'
+            '<ca:SamAccountName>Everyone</ca:SamAccountName>'
+            '<ca:GroupScope>DomainLocal</ca:GroupScope>'
+            '<ca:GroupType>Security</ca:GroupType>'
+            '</ca:ActiveDirectoryGroup>'
+            # Normal AD group, all fields populated.
+            '<ca:ActiveDirectoryGroup>'
+            '<ca:DistinguishedName>CN=Domain Users,CN=Users,DC=example,DC=local</ca:DistinguishedName>'
+            '<ca:Name>Domain Users</ca:Name>'
+            '<ca:ObjectClass>group</ca:ObjectClass>'
+            '<ca:ObjectGuid>b527cac1-c989-4791-8893-40e956241978</ca:ObjectGuid>'
+            '<ca:ObjectTypes xmlns:b="http://schemas.microsoft.com/2003/10/Serialization/Arrays">'
+            '<b:string>top</b:string><b:string>group</b:string>'
+            '</ca:ObjectTypes>'
+            '<ca:ReferenceServer>example.local</ca:ReferenceServer>'
+            f'<ca:SID>{_sid_b64("S-1-5-21-1-2-3-513")}</ca:SID>'
+            '<ca:SamAccountName>Domain Users</ca:SamAccountName>'
+            '<ca:GroupScope>Global</ca:GroupScope>'
+            '<ca:GroupType>Security</ca:GroupType>'
+            '</ca:ActiveDirectoryGroup>'
+            '</ca:MemberOf></ca:GetADPrincipalAuthorizationGroupResponse>'
+        )
+        groups = client.get_ad_principal_authorization_group(
+            "CN=alice,CN=Users,DC=example,DC=local",
+            partition_dn="DC=example,DC=local",
+        )
+        self.assertEqual(len(groups), 2)
+
+        everyone, dom_users = groups
+
+        # Well-known SID: nil scalars surface as explicit None (not absent),
+        # empty ObjectTypes wrapper → [].
+        self.assertEqual(everyone["Name"], "Everyone")
+        self.assertEqual(everyone["SID"], "S-1-1-0")
+        self.assertIn("DistinguishedName", everyone)
+        self.assertIsNone(everyone["DistinguishedName"])
+        self.assertIsNone(everyone["ObjectClass"])
+        self.assertEqual(everyone["SamAccountName"], "Everyone")
+        self.assertEqual(everyone["GroupScope"], "DomainLocal")
+        self.assertEqual(everyone["ObjectTypes"], [])
+
+        # Normal AD group: all fields populated.
+        self.assertEqual(
+            dom_users["DistinguishedName"],
+            "CN=Domain Users,CN=Users,DC=example,DC=local",
+        )
+        self.assertEqual(dom_users["GroupScope"], "Global")
+        self.assertEqual(dom_users["SID"], "S-1-5-21-1-2-3-513")
+        self.assertEqual(dom_users["ObjectTypes"], ["top", "group"])
+
+    def test_parses_under_spec_authorization_groups_wrapper(self):
+        """Spec-conformant wrapper name must still parse (forward-compat)."""
+        client = _build_cap_client("AccountManagement")
+        client._nmf.recv.return_value = _wrap_envelope(
+            '<ca:GetADPrincipalAuthorizationGroupResponse>'
+            '<ca:AuthorizationGroups xmlns:i="http://www.w3.org/2001/XMLSchema-instance">'
+            '<ca:ActiveDirectoryGroup>'
+            '<ca:Name>Users</ca:Name>'
+            '<ca:ObjectClass>group</ca:ObjectClass>'
+            f'<ca:SID>{_sid_b64("S-1-5-32-545")}</ca:SID>'
+            '<ca:GroupScope>DomainLocal</ca:GroupScope>'
+            '</ca:ActiveDirectoryGroup>'
+            '</ca:AuthorizationGroups></ca:GetADPrincipalAuthorizationGroupResponse>'
+        )
+        groups = client.get_ad_principal_authorization_group(
+            "CN=alice,CN=Users,DC=example,DC=local",
+            partition_dn="DC=example,DC=local",
+        )
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["Name"], "Users")
+        self.assertEqual(groups[0]["SID"], "S-1-5-32-545")
+
+
+class FormatPrincipalListPowershellTests(unittest.TestCase):
+    """Verify the PowerShell-style Format-List renderer used by the 3
+    AccountManagement dispatch paths in src/soaphound/soaphound.py.
+    """
+
+    def test_two_principals_block_alignment_and_list_rendering(self):
+        principals = [
+            {
+                "DistinguishedName": "CN=Administrator,CN=Users,DC=example,DC=local",
+                "Name": "Administrator",
+                "ObjectClass": "user",
+                "ObjectTypes": ["top", "person", "organizationalPerson", "user"],
+                "SID": "S-1-5-21-1-2-3-500",
+            },
+            {
+                "DistinguishedName": "CN=Domain Users,CN=Users,DC=example,DC=local",
+                "Name": "Domain Users",
+                "ObjectClass": "group",
+                "ObjectTypes": ["top", "group"],
+                "SID": "S-1-5-21-1-2-3-513",
+            },
+        ]
+        out = _format_principal_list_powershell(principals)
+        # Blocks separated by exactly one blank line.
+        self.assertIn("\n\n", out)
+        blocks = out.split("\n\n")
+        self.assertEqual(len(blocks), 2)
+        # Colon aligned on longest key per block (DistinguishedName = 17).
+        self.assertIn("DistinguishedName : CN=Administrator,CN=Users,DC=example,DC=local", blocks[0])
+        self.assertIn("Name              : Administrator", blocks[0])
+        # ObjectTypes rendered as PowerShell-style braced list.
+        self.assertIn("ObjectTypes       : {top, person, organizationalPerson, user}", blocks[0])
+        self.assertIn("ObjectTypes       : {top, group}", blocks[1])
+        # Trailing block has no extra blank line.
+        self.assertFalse(out.endswith("\n"))
+
+    def test_well_known_none_values_render_as_empty_string(self):
+        principals = [
+            {
+                "DistinguishedName": None,
+                "Name": "Everyone",
+                "ObjectClass": None,
+                "ObjectTypes": [],
+                "SID": "S-1-1-0",
+            },
+        ]
+        out = _format_principal_list_powershell(principals)
+        # None → empty string on the right of the colon, never the literal "None".
+        self.assertIn("DistinguishedName : \n", out + "\n")
+        self.assertIn("ObjectClass       : \n", out + "\n")
+        self.assertNotIn(": None", out)
+        # Empty list renders as "{}".
+        self.assertIn("ObjectTypes       : {}", out)
+        # Populated string field still renders plainly.
+        self.assertIn("Name              : Everyone", out)
+        self.assertIn("SID               : S-1-1-0", out)
 
 
 if __name__ == "__main__":
