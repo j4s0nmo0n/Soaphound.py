@@ -45,7 +45,7 @@ def _resolve_dc_fqdn(dc_arg: str) -> str:
         raise SystemExit(
             f"[-] MS-ADCAP primitives require a DNS hostname for the DC, "
             f"but '-dc {dc_arg}' is an IP and reverse DNS lookup failed: {exc}. "
-            f"Re-run with '-dc <dc-fqdn>' (e.g. '-dc dc-curse.jjk.local')."
+            f"Re-run with '-dc <dc-fqdn>' (e.g. '-dc dc01.corp.local')."
         )
     return fqdn
 
@@ -147,11 +147,26 @@ def main():
         kdc_host = getattr(options, 'kdc_ip', None) or options.domain_controller
 
         # ------------------------------------------------------------------
-        # Selection du mode d'authentification (NTLM ou Kerberos)
+        # Authentication mode selection (NTLM or Kerberos)
         # ------------------------------------------------------------------
-        if options.kerberos:
-            # Mode Kerberos: on s'appuie sur le cache KRB5CCNAME.
-            # Si le username est manquant, on l'extrait depuis le ccache.
+        # WS-Trust enrollment primitives (--list-policies-ws / --enroll-ws)
+        # talk HTTPS/443 to AD CS and authenticate via requests-gssapi, which
+        # reads the system Kerberos cache directly (KRB5CCNAME). They do not
+        # consume the CLI credential flags, so the validation chain below
+        # must not reject them for lacking -u/-p/--hashes/-k. Add new
+        # auth-less primitives to STANDALONE_PRIMITIVES as they appear.
+        STANDALONE_PRIMITIVES = ("enroll_ws", "list_policies_ws")
+        is_standalone = any(getattr(options, name, False) for name in STANDALONE_PRIMITIVES)
+
+        if is_standalone:
+            logging.debug(
+                "Authentication skipped for standalone WS-Trust primitive "
+                "(uses system Kerberos ccache via requests-gssapi)."
+            )
+            auth = None
+        elif options.kerberos:
+            # Kerberos mode: rely on the KRB5CCNAME ccache.
+            # If the username is missing, extract it from the ccache.
             logging.debug('Authentication: Kerberos (KRB5CCNAME)')
 
             krb5cc = os.getenv('KRB5CCNAME')
@@ -172,18 +187,18 @@ def main():
                     )
                     if not options.username and ccache_user:
                         options.username = ccache_user
-                        logging.debug('Username extrait du ccache: %s', options.username)
+                        logging.debug('Username extracted from ccache: %s', options.username)
                     if not options.domain and ccache_domain:
                         options.domain = ccache_domain
-                        logging.debug('Domain extrait du ccache: %s', options.domain)
+                        logging.debug('Domain extracted from ccache: %s', options.domain)
                 except Exception as e:
-                    logging.debug("Impossible de parser le ccache: %s", e)
+                    logging.debug("Unable to parse ccache: %s", e)
 
             if not options.username:
-                logging.critical("Username introuvable: passez -u ou utilisez un ccache contenant un principal valide.")
+                logging.critical("Username not found: pass -u or use a ccache that contains a valid principal.")
                 sys.exit(1)
             if not options.domain:
-                logging.critical("Domaine introuvable: passez -d ou utilisez un ccache contenant un principal valide.")
+                logging.critical("Domain not found: pass -d or use a ccache that contains a valid principal.")
                 sys.exit(1)
 
             auth = KerberosAuth(kdc_host=kdc_host)
@@ -250,6 +265,76 @@ def main():
             print(json.dumps(result, indent=2, ensure_ascii=False))
             success = True
             return
+
+        # WS-Trust certificate enrollment dispatch (MS-XCEP + MS-WSTEP).
+        # Short-circuits the collect pipeline just like --adcap-* above: no
+        # RootDSE, no Enumeration session, no cache. The two primitives
+        # talk HTTPS/443 to /ADPolicyProvider_CEP_Kerberos and
+        # /<ca>_CES_Kerberos/service.svc/CES, authenticating with the ccache
+        # pointed to by KRB5CCNAME via requests-gssapi + RFC 5929 CBT.
+        if getattr(options, "list_policies_ws", False) or getattr(options, "enroll_ws", False):
+            from contextlib import nullcontext
+            from soaphound.adcs.kerb_tgt import inline_tgt_ccache
+
+            # When CLI creds are supplied, do an in-process AS-REQ via impacket
+            # and expose the TGT through a tempdir ccache that requests-gssapi
+            # can read. Without creds, fall back to the system ccache (user
+            # ran kinit beforehand or set KRB5CCNAME).
+            has_cli_creds = bool(
+                options.password or options.hashes or getattr(options, "aes_key", None)
+            )
+            if has_cli_creds:
+                lm_hash, nt_hash = "", ""
+                if options.hashes:
+                    parts = options.hashes.split(":", 1)
+                    if len(parts) == 2:
+                        lm_hash, nt_hash = parts
+                    else:
+                        nt_hash = parts[0]
+                auth_ctx = inline_tgt_ccache(
+                    username=options.username,
+                    domain=options.domain,
+                    password=options.password,
+                    nt_hash=nt_hash or None,
+                    lm_hash=lm_hash or None,
+                    aes_key=getattr(options, "aes_key", None),
+                    kdc_ip=getattr(options, "kdc_ip", None) or options.domain_controller,
+                )
+            else:
+                auth_ctx = nullcontext()
+
+            with auth_ctx:
+                if getattr(options, "list_policies_ws", False):
+                    from soaphound.adcs.xcep import DEFAULT_USER_AGENT, run_list_policies
+
+                    run_list_policies(
+                        remote_name=options.domain_controller,
+                        cep_url=getattr(options, "cep_url", None),
+                        ca_name=getattr(options, "wstep_ca", None),
+                        insecure_ssl=getattr(options, "insecure_ssl", False),
+                        user_agent=getattr(options, "user_agent", None) or DEFAULT_USER_AGENT,
+                    )
+                    success = True
+                    return
+
+                if getattr(options, "enroll_ws", False):
+                    from soaphound.adcs.wstep import run_enroll
+                    from soaphound.adcs.xcep import DEFAULT_USER_AGENT
+
+                    run_enroll(
+                        remote_name=options.domain_controller,
+                        ces_url=getattr(options, "ces_url", None),
+                        cep_url=getattr(options, "cep_url", None),
+                        ca_name=getattr(options, "wstep_ca", None),
+                        template_name=getattr(options, "wstep_template", None),
+                        upn=getattr(options, "wstep_upn", None),
+                        out_path=getattr(options, "wstep_out", None),
+                        insecure_ssl=getattr(options, "insecure_ssl", False),
+                        user_agent=getattr(options, "user_agent", None) or DEFAULT_USER_AGENT,
+                        auth_dc=getattr(options, "auth_dc", None),
+                    )
+                    success = True
+                    return
 
         # 1. RootDSE query (Resource)
         adws_resource = ADWSConnect(options.domain_controller, options.domain, options.username, auth, "Resource")
@@ -532,11 +617,11 @@ def main():
                 )
                 try:
                     if not smb_auth.load_ccache():
-                        logging.warning("Impossible de charger un TGT depuis le ccache. "
+                        logging.warning("Unable to load a TGT from the ccache. "
                                         "SMB session collection may fail. "
                                         "Verify KRB5CCNAME and the ticket validity.")
                 except Exception as e:
-                    logging.warning("Erreur lors du chargement du ccache: %s", e)
+                    logging.warning("Error while loading the ccache: %s", e)
             else:
                 smb_auth = ADAuthentication(username=options.username, password=options.password, domain=options.domain, lm_hash=lm, nt_hash=nt, aeskey=aeskey, kdc=options.domain_controller)
 
