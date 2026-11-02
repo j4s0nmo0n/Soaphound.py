@@ -12,19 +12,16 @@ eggs/
 *.egg-info/
 *.egg
 MANIFEST
-
 # Virtual environments
 .venv/
 venv/
 env/
 .env
-
 # IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
-
 # Testing / coverage
 .pytest_cache/
 .coverage
@@ -32,7 +29,6 @@ env/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
-
 # Soaphound runtime artifacts
 bloodhound-*/
 *.ccache
@@ -46,19 +42,15 @@ bloodhound-*/
 *_containers.json
 *_domains.json
 20*_*.zip
-
 # Working artifacts (don't commit patches/diffs at root)
 *.patch
 *.diff
-
 # Mission outputs - never commit
 Cache.json
 *.log
 soaphound-*.log
-
 # Helper scripts (kept local only)
 resolve_sids_in_log.py
-
 # BloodHound JSON outputs
 [0-9]*_users.json
 [0-9]*_computers.json
@@ -67,12 +59,9 @@ resolve_sids_in_log.py
 [0-9]*_containers.json
 [0-9]*_gpos.json
 [0-9]*_domains.json
-
 # Test/mission output artifacts
 *_Soaphound_CertFind.json
 *_Soaphound_CertFind.txt
-Cache.json
-
 # Pentest run outputs (local-only, never commit)
 2026*_*.json
 2026*_*.txt
@@ -82,29 +71,16 @@ Certipy*
 privilege_rights*
 output/
 soaphound-out/
-
 # Pentest / collect outputs — never commit
 [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*.json
 [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*.txt
 *_Soaphound_CertFind*
-TrustsAudit*
-Certipy*
-privilege_rights*
-Cache.json
-*.log
-output/
 loot/
-soaphound-out/
 bloodhound-out/
 *-resolved.log
 *-fixes.patch
 src/soaphound_py.egg-info/
-
 # Setuptools build artefacts
-*.egg-info/
-build/
-dist/
-
 # Personal working directories — notes, measurements, design reviews
 measurements/
 scratch/
