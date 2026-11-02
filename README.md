@@ -30,6 +30,7 @@ Full documentation lives on the **[Soaphound.py Wiki](https://github.com/j4s0nmo
 ### Defender's corner
 - [Detection & Hunting Tips](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Detection)
 
+
 ## Collection methods
 
 | Preset | Network ports | AD coverage | Use case |
