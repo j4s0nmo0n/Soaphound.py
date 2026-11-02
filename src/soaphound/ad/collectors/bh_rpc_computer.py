@@ -24,10 +24,12 @@
 ####################
 
 import logging
+import socket
 import traceback
 import calendar
 import time
 import re
+import dns.resolver
 from impacket.dcerpc.v5 import transport, samr, srvs, lsat, lsad, nrpc, wkst, scmr, tsch, rrp
 from impacket.dcerpc.v5.rpcrt import DCERPCException, RPC_C_AUTHN_LEVEL_PKT_INTEGRITY
 from impacket.dcerpc.v5.ndr import NULL
@@ -285,32 +287,37 @@ class ADComputer(object):
         addr = None
         try:
             addr = self.ad.dnscache.get(self.hostname)
-           # print(f"[DEBUG] DNS cache pour {self.hostname}: {addr}")
         except KeyError:
             try:
                 q = self.ad.dnsresolver.query(self.hostname, 'A', tcp=self.ad.dns_tcp)
                 for r in q:
                     addr = r.address
-           #     print(f"[DEBUG] DNS resolution for {self.hostname}: {addr}")   
-                if addr == None:
-            #        print(f"[DEBUG] DNS resolution failed for {self.hostname}")
+                if addr is None:
                     return False
-            except Exception as e:
-             #   print(f"[DEBUG] DNS error for {self.hostname}: {e}")
-                return False
-            
-            # Do exit properly on keyboardinterrupts
             except KeyboardInterrupt:
                 raise
+            except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer,
+                    dns.resolver.NoNameservers, dns.exception.Timeout) as dns_err:
+                # dnspython bypasses NSS, so lab hostnames that only exist
+                # in /etc/hosts fail here. Fall back to socket.gethostbyname
+                # which goes through NSS and reads /etc/hosts.
+                try:
+                    addr = socket.gethostbyname(self.hostname)
+                    logging.debug('Resolved %s via NSS fallback (%s): %s',
+                                  self.hostname, type(dns_err).__name__, addr)
+                except socket.gaierror as nss_err:
+                    if isinstance(dns_err, dns.resolver.NXDOMAIN):
+                        logging.info('Skipping enumeration for %s since it could not be resolved.',
+                                     self.hostname)
+                    else:
+                        # Demoted to DEBUG: expected in reduced lab topologies
+                        # where some hosts are intentionally not in /etc/hosts.
+                        logging.debug('Could not resolve: %s: %s / NSS fallback: %s',
+                                      self.hostname, dns_err, nss_err)
+                    return False
             except Exception as e:
-                # Doesn't exist
-                if "None of DNS query names exist" in str(e):
-                    logging.info('Skipping enumeration for %s since it could not be resolved.', self.hostname)
-                else:
-                    logging.warning('Could not resolve: %s: %s', self.hostname, e)
+                logging.debug('Could not resolve: %s: %s', self.hostname, e)
                 return False
-
-            #logging.debug('Resolved: %s' % addr)
 
             self.ad.dnscache.put(self.hostname, addr)
 
@@ -998,5 +1005,7 @@ class ADComputer(object):
                 })
         except Exception as e:
             import logging
-            logging.info(f"TSTS/TSHandler session enum failed on {self.hostname}: {e}")
+            # Demoted to DEBUG: impacket TermSrvEnumeration signature mismatch
+            # is a known shortcoming; it does not indicate a real error.
+            logging.debug(f"TSTS/TSHandler session enum failed on {self.hostname}: {e}")
         return sessions
