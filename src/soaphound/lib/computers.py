@@ -127,19 +127,21 @@ class ComputerEnumerator(MembershipEnumerator):
         if hostname and (not self.exclude_dcs or not ADUtils.is_dc(entry)) and c.try_connect():
             try:
 
-                # Affichage temporaire pour debug
                 sessions = []
-                if 'session' in self.collect and False: #TODO Fix TS collect
-                    # Sessions SMB (NetSessionEnum)
+                if 'session' in self.collect:
+                    # SMB sessions via NetSessionEnum (SRVSVC).
                     sessions = c.rpc_get_sessions() or []
-                   # print(f"[DEBUG] Sessions (NetSessionEnum) sur {hostname}: {sessions}")
-                    # Sessions RDP/Terminal Services (TSHandler)
-                    ts_sessions = c.tsts_get_sessions() or []
-                    print(ts_sessions)
-                    #print(f"[DEBUG] Sessions RDP sur {hostname}: {ts_sessions}")
-                    if ts_sessions:
-                        sessions.extend(ts_sessions)
-                # Si on ne collecte pas, sessions reste une liste vide
+                    # Terminal Services sessions via TSHandler. Guarded
+                    # separately because the TSTS binding can throw on
+                    # hosts without a reachable Terminal Services
+                    # endpoint, and that must not drop the SMB sessions
+                    # already collected above.
+                    try:
+                        ts_sessions = c.tsts_get_sessions() or []
+                        if ts_sessions:
+                            sessions.extend(ts_sessions)
+                    except Exception as _ts_e:
+                        logging.debug("TSHandler enum failed on %s: %s", hostname, _ts_e)
 
                 # Immediate debug output
                 #if sessions:
@@ -254,7 +256,7 @@ class ComputerEnumerator(MembershipEnumerator):
                             self.addomain.samcache.put(ses['username'], users)
                         else:
                             logging.warning('Failed to resolve SAM name %s in current forest', ses['user'])
-                            continue  # Skip this session when the user is unknown
+                            continue  # On ne traite pas cette session si l'utilisateur est inconnu
 
                     # users must now exist and be non-empty
                     if not users:
