@@ -45,7 +45,7 @@ def _resolve_dc_fqdn(dc_arg: str) -> str:
         raise SystemExit(
             f"[-] MS-ADCAP primitives require a DNS hostname for the DC, "
             f"but '-dc {dc_arg}' is an IP and reverse DNS lookup failed: {exc}. "
-            f"Re-run with '-dc <dc-fqdn>' (e.g. '-dc dc-curse.jjk.local')."
+            f"Re-run with '-dc <dc-fqdn>' (e.g. '-dc dc01.corp.local')."
         )
     return fqdn
 

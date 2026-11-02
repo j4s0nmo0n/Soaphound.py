@@ -165,19 +165,19 @@ pip install git+https://github.com/j4s0nmo0n/Soaphound.py
 Perform ADWS collection with session enumeration
 
 ```
-soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output
+soaphound -d corp.local -u alice -p Password123! -dc dc01 --output-dir output
 ```
 
 Perform Stealth collection (ADWS only, no SMB — skips SYSVOL, local admins, cpassword, computer sessions)
 
 ```
-soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --output-dir output -c Stealth
+soaphound -d corp.local -u alice -p Password123! -dc dc01 --output-dir output -c Stealth
 ```
 
 Perform ADCS information collection
 
 ```
-soaphound -d jjk.local -u yuji -p SukunaIsAbitch -dc dc-curse --cert-find --cert-find-force-epa auto
+soaphound -d corp.local -u alice -p Password123! -dc dc01 --cert-find --cert-find-force-epa auto
 ```
 
 # Kerberos authentication (-k)
@@ -188,19 +188,19 @@ The ccache may contain a valid TGT or a usable service ticket, depending on the 
 
 ```bash
 # Load a Kerberos ticket
-export KRB5CCNAME=/tmp/yuji.ccache
+export KRB5CCNAME=/tmp/alice.ccache
 
 # Run Soaphound with Kerberos
-soaphound -d jjk.local -u yuji -dc dc-curse.jjk.local -k
+soaphound -d corp.local -u alice -dc dc01.corp.local -k
 
 # Run Stealth collection with Kerberos (ADWS only, no SMB)
-soaphound -d jjk.local -u yuji -dc dc-curse.jjk.local -k -c Stealth
+soaphound -d corp.local -u alice -dc dc01.corp.local -k -c Stealth
 
 # Let Soaphound extract the username and domain from the ccache
-soaphound -dc dc-curse.jjk.local -k -c Stealth
+soaphound -dc dc01.corp.local -k -c Stealth
 
 # Use a different KDC
-soaphound -d jjk.local -u yuji -dc adws.jjk.local -dc-ip kdc.jjk.local -k
+soaphound -d corp.local -u alice -dc adws.corp.local -dc-ip kdc.corp.local -k
 ```
 
 # References

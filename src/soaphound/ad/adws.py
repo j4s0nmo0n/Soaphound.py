@@ -867,7 +867,7 @@ class ADWSConnect:
 
         _handle_str_to_xml raises ADWSError on <s:Fault>, so we convert that
         exception into a plain dict here. The MS-ADCAP primitives report
-        AccessDenied via Fault (non-privileged yuji on ChangeOptionalFeature,
+        AccessDenied via Fault (non-privileged alice on ChangeOptionalFeature,
         for example) and callers want to switch on the error label rather than
         handle exceptions.
         """

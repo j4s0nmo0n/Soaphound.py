@@ -567,7 +567,7 @@ def _is_domain_naming_context(nc, config_nc, schema_nc):
 
 
 def _nc_to_domain_name(nc):
-    """Convert a domain NC like 'DC=modulo,DC=jjk,DC=local' to 'modulo.jjk.local'."""
+    """Convert a domain NC like 'DC=sub,DC=corp,DC=local' to 'modulo.corp.local'."""
     if not nc:
         return ""
     parts = [p.strip()[3:] for p in nc.split(",") if p.strip().upper().startswith("DC=")]
