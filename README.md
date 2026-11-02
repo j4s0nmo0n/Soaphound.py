@@ -6,6 +6,30 @@ We sought to follow a similar logic while implementing Soaphound.py, aiming to c
 
 The tool is currently being improved to cover all specific data collection scenarios. At the time of writing, it is capable of collecting Active Directory objects via the ADWS service and retrieving remote session data similar to what BloodHound.py achieves.
 
+
+## Documentation
+
+Full documentation lives on the **[Soaphound.py Wiki](https://github.com/j4s0nmo0n/Soaphound.py/wiki)**.
+
+### Getting started
+- [Installation](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Installation)
+- [Quick Start](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Quick-Start)
+
+### Collection
+- [BloodHound Ingestion](https://github.com/j4s0nmo0n/Soaphound.py/wiki/BloodHound-Ingestion) · [Collection Presets](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Collection-Presets) · [Output Format](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Output-Format)
+
+### Primitives
+- [AD CS Enumeration](https://github.com/j4s0nmo0n/Soaphound.py/wiki/AD-CS-Enumeration) · [AD CS Enrollment (MS-XCEP + MS-WSTEP)](https://github.com/j4s0nmo0n/Soaphound.py/wiki/AD-CS-Enrollment)
+- [MS-ADCAP TopologyManagement](https://github.com/j4s0nmo0n/Soaphound.py/wiki/MS-ADCAP) · [BadSuccessor Orchestrator](https://github.com/j4s0nmo0n/Soaphound.py/wiki/BadSuccessor)
+- [Trust Audit](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Trust-Audit) · [Privilege Rights Audit](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Privilege-Rights-Audit)
+
+### Attack playbooks
+- [ESC4 via Full SOAP](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Playbook-ESC4)
+- [BadSuccessor via ADWS Writes](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Playbook-BadSuccessor)
+
+### Defender's corner
+- [Detection & Hunting Tips](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Detection)
+
 ## Collection methods
 
 | Preset | Network ports | AD coverage | Use case |
