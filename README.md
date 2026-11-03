@@ -203,6 +203,12 @@ soaphound -dc dc01.corp.local -k -c Stealth
 soaphound -d corp.local -u alice -dc adws.corp.local -dc-ip kdc.corp.local -k
 ```
 
+# Talks
+
+- **Hackfest 2026** (Quebec City, October 2026) — *Reconnaissance AD depuis Linux*
+  — [Slides (PDF)](https://github.com/j4s0nmo0n/Soaphound.py/releases/download/hackfest-2026/Hackfest.Talk.-.Quebec.-.October.-.2026.pdf)
+  · [Talk page](https://github.com/j4s0nmo0n/Soaphound.py/wiki/Hackfest-2026-Talk)
+
 # References
 
 - [Falcon Force Team](https://falconforce.nl/soaphound-tool-to-collect-active-directory-data-via-adws/) for the initial inspiration.
